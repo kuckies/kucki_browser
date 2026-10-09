@@ -410,11 +410,11 @@ class SettingsWindow(QMainWindow):
 
 
 # ============================================================
-# KUCKI BROWSER — основное окно
+# KUCKI BROWSER — основное окно (структура как в Chrome)
 # ============================================================
 
-class TitleBar(QWidget):
-    """Кастомная панель заголовка (заменяет стандартную Windows-рамку)"""
+class TabBar(QWidget):
+    """Панель вкладок + кнопки окна (как в Chrome — всё в одной строке)"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -422,30 +422,88 @@ class TitleBar(QWidget):
         self._build_ui()
         self._drag_pos = None
         self.setStyleSheet("""
-            TitleBar {
-                background: #111113;
+            TabBar {
+                background: #0a0a0c;
                 border-bottom: 1px solid #222225;
             }
         """)
 
     def _build_ui(self):
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 0, 0, 0)
-        layout.setSpacing(8)
+        layout.setContentsMargins(8, 4, 0, 0)
+        layout.setSpacing(0)
 
-        # Логотип
+        # Логотип слева
         logo = QLabel("🚀")
-        logo.setStyleSheet("font-size: 14px")
+        logo.setStyleSheet("font-size: 13px; padding: 0 8px;")
         layout.addWidget(logo)
 
-        # Заголовок
-        title = QLabel("Kucki Browser")
-        title.setStyleSheet("color: #a1a1aa; font-size: 12px; font-weight: 500")
-        layout.addWidget(title)
+        # Вкладки (QTabWidget без рамок)
+        self.tabs = QTabWidget()
+        self.tabs.setDocumentMode(True)
+        self.tabs.setTabsClosable(True)
+        self.tabs.setMovable(True)
+        self.tabs.setStyleSheet("""
+            QTabWidget::pane {
+                border: none;
+                background: #0a0a0c;
+            }
+            QTabBar {
+                background: transparent;
+            }
+            QTabBar::tab {
+                background: #18181b;
+                color: #a1a1aa;
+                padding: 8px 16px 8px 12px;
+                margin: 4px 2px 0 0;
+                border: none;
+                border-top-left-radius: 8px;
+                border-top-right-radius: 8px;
+                min-width: 100px;
+                max-width: 240px;
+                font-size: 12px;
+            }
+            QTabBar::tab:selected {
+                background: #27272a;
+                color: #fafafa;
+            }
+            QTabBar::tab:hover {
+                background: #1f1f23;
+            }
+            QTabBar::close-button {
+                subcontrol-position: right;
+                padding: 2px;
+                margin-left: 8px;
+            }
+            QTabBar::close-button:hover {
+                background: rgba(239, 68, 68, 0.3);
+                border-radius: 3px;
+            }
+        """)
+        layout.addWidget(self.tabs, 1)
 
+        # Кнопка "+" для новой вкладки
+        new_tab_btn = QPushButton("+")
+        new_tab_btn.setFixedSize(32, 28)
+        new_tab_btn.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                border: none;
+                color: #71717a;
+                font-size: 16px;
+                border-radius: 6px;
+            }
+            QPushButton:hover {
+                background: #1a1a1d;
+                color: #fafafa;
+            }
+        """)
+        layout.addWidget(new_tab_btn)
+
+        # Спейсер
         layout.addStretch()
 
-        # Кнопки управления окном
+        # Кнопки управления окном (справа, как в Chrome)
         btn_style = """
             QPushButton {
                 background: transparent;
@@ -453,7 +511,7 @@ class TitleBar(QWidget):
                 color: #71717a;
                 width: 46px;
                 height: 38px;
-                font-size: 12px;
+                font-size: 11px;
             }
             QPushButton:hover {
                 background: #1a1a1d;
@@ -467,7 +525,7 @@ class TitleBar(QWidget):
                 color: #71717a;
                 width: 46px;
                 height: 38px;
-                font-size: 12px;
+                font-size: 11px;
             }
             QPushButton:hover {
                 background: #ef4444;
@@ -490,6 +548,9 @@ class TitleBar(QWidget):
         layout.addWidget(self.minimize_btn)
         layout.addWidget(self.maximize_btn)
         layout.addWidget(self.close_btn)
+
+        # Подключаем кнопку "+" к сигналу
+        new_tab_btn.clicked.connect(lambda: self.window().new_tab())
 
     def _toggle_maximize(self):
         win = self.window()
@@ -533,7 +594,7 @@ class KuckiBrowser(QMainWindow):
         # Для изменения размера окна за края
         self._resizing = False
         self._resize_dir = None
-        self._resize_margin = 8  #_pixels от края для активации resize
+        self._resize_margin = 8
 
     def _get_resize_direction(self, pos):
         """Определяет направление изменения размера по позиции курсора"""
@@ -685,28 +746,28 @@ class KuckiBrowser(QMainWindow):
         """)
 
     def _build_ui(self):
-        # Главный контейнер с кастомным title bar
+        # Главный контейнер
         central = QWidget()
         main_layout = QVBoxLayout(central)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # Кастомный title bar (заменяет Windows-рамку)
-        self.title_bar = TitleBar()
-        main_layout.addWidget(self.title_bar)
+        # TabBar = вкладки + кнопки окна в одной строке (как в Chrome)
+        self.tab_bar = TabBar()
+        main_layout.addWidget(self.tab_bar)
+        self.tabs = self.tab_bar.tabs
 
-        # Вкладки
-        self.tabs = QTabWidget()
-        self.tabs.setDocumentMode(True)
-        self.tabs.setTabsClosable(True)
+        # Подключаем сигналы вкладок
         self.tabs.tabCloseRequested.connect(self._close_tab)
         self.tabs.currentChanged.connect(self._on_tab_changed)
-        main_layout.addWidget(self.tabs, 1)
+
+        # Toolbar (адресная строка, навигация)
+        tb = QToolBar()
+        tb.setMovable(False)
+        tb.setIconSize(QSize(18, 18))
+        main_layout.addWidget(tb)
 
         self.setCentralWidget(central)
-
-        tb = QToolBar(); tb.setMovable(False)
-        self.addToolBar(tb)
 
         self.back_btn = QPushButton("←")
         self.fwd_btn = QPushButton("→")
@@ -843,34 +904,44 @@ function App() {
 
   return (
     <div className="min-h-screen bg-[#0a0a0c] text-[#fafafa] font-sans antialiased">
-      {/* Top bar — custom title bar + tabs */}
-      <div className="sticky top-0 z-50 bg-[#111113] border-b border-[#222225]">
-        {/* Custom title bar */}
-        <div className="flex items-center px-4 py-2 border-b border-[#1a1a1d]">
-          <span className="text-sm mr-2">🚀</span>
-          <span className="text-[11px] text-[#71717a] font-medium">Kucki Browser</span>
-          <div className="flex-1" />
-          <button className="w-11 h-9 flex items-center justify-center text-[#71717a] hover:bg-[#1a1a1d] hover:text-[#fafafa] transition-colors text-xs">—</button>
-          <button className="w-11 h-9 flex items-center justify-center text-[#71717a] hover:bg-[#1a1a1d] hover:text-[#fafafa] transition-colors text-xs">□</button>
-          <button className="w-11 h-9 flex items-center justify-center text-[#71717a] hover:bg-[#ef4444] hover:text-white transition-colors text-xs">✕</button>
-        </div>
+      {/* Top bar — как в Chrome: вкладки + кнопки окна в одной строке */}
+      <div className="sticky top-0 z-50 bg-[#0a0a0c] border-b border-[#222225]">
+        <div className="flex items-end px-2 pt-1">
+          {/* Логотип */}
+          <div className="flex items-center px-2 pb-2">
+            <span className="text-[13px]">🚀</span>
+          </div>
 
-        {/* Tabs */}
-        <div className="flex items-end pt-2 px-2">
-            {sections.map(s => (
-              <button
-                key={s.id}
-                onClick={() => setSection(s.id)}
-                className={`px-5 py-2 text-[12px] tracking-wide rounded-t-lg transition-colors border-r border-[#222225] ${
-                  section === s.id
-                    ? 'bg-[#0a0a0c] text-[#fafafa] border-t-2 border-t-[#10b981]'
-                    : 'bg-[#111113] text-[#71717a] hover:text-[#a1a1aa]'
-                }`}
-              >
-                <span className="mr-2 opacity-70">{s.icon}</span>
-                {s.label}
-              </button>
-            ))}
+          {/* Вкладки навигации */}
+          {sections.map(s => (
+            <button
+              key={s.id}
+              onClick={() => setSection(s.id)}
+              className={`px-4 py-2 text-[12px] rounded-t-lg flex items-center gap-2 mt-1 min-w-[100px] max-w-[200px] transition-colors ${
+                section === s.id
+                  ? 'bg-[#27272a] text-[#fafafa]'
+                  : 'bg-[#18181b] text-[#a1a1aa] hover:bg-[#1f1f23] hover:text-[#fafafa]'
+              }`}
+            >
+              <span className="opacity-70 text-[11px]">{s.icon}</span>
+              <span className="truncate">{s.label}</span>
+              {section === s.id && (
+                <span className="ml-auto w-3 h-3 flex items-center justify-center rounded hover:bg-red-500/30 text-[#71717a] hover:text-[#fafafa] text-[10px]">×</span>
+              )}
+            </button>
+          ))}
+
+          {/* Кнопка "+" */}
+          <button className="w-8 h-7 flex items-center justify-center rounded-md text-[#71717a] hover:bg-[#1a1a1d] hover:text-[#fafafa] text-sm mt-1 ml-1">+</button>
+
+          <div className="flex-1" />
+
+          {/* Кнопки окна */}
+          <div className="flex items-center">
+            <button className="w-[46px] h-[38px] flex items-center justify-center text-[#71717a] hover:bg-[#1a1a1d] hover:text-[#fafafa] transition-colors text-[11px]">—</button>
+            <button className="w-[46px] h-[38px] flex items-center justify-center text-[#71717a] hover:bg-[#1a1a1d] hover:text-[#fafafa] transition-colors text-[11px]">□</button>
+            <button className="w-[46px] h-[38px] flex items-center justify-center text-[#71717a] hover:bg-[#ef4444] hover:text-white transition-colors text-[11px]">✕</button>
+          </div>
         </div>
       </div>
 
@@ -923,43 +994,57 @@ function PreviewSection() {
         </p>
       </div>
 
-      {/* Browser mockup */}
+      {/* Browser mockup — структура как в Chrome */}
       <div className="rounded-xl overflow-hidden border border-[#222225] shadow-2xl shadow-black/40">
-        {/* Custom title bar (FramelessWindowHint) */}
-        <div className="bg-[#111113] px-4 py-2 flex items-center gap-3 border-b border-[#222225]">
-          <span className="text-sm">🚀</span>
-          <span className="text-[11px] text-[#71717a] font-medium">Kucki Browser</span>
+        {/* Tab bar + window controls — одна строка, как в Chrome */}
+        <div className="bg-[#0a0a0c] flex items-end px-2 pt-1">
+          {/* Логотип */}
+          <div className="flex items-center px-2 pb-2">
+            <span className="text-[13px]">🚀</span>
+          </div>
+
+          {/* Активная вкладка */}
+          <div className="bg-[#27272a] text-[#fafafa] text-[12px] px-3 py-2 rounded-t-lg flex items-center gap-2 mt-1 min-w-[120px] max-w-[240px]">
+            <span className="text-[#10b981] text-[10px]">◉</span>
+            <span className="truncate flex-1">Google</span>
+            <button className="w-4 h-4 flex items-center justify-center rounded hover:bg-red-500/30 text-[#71717a] hover:text-[#fafafa] text-[10px] flex-shrink-0">×</button>
+          </div>
+
+          {/* Неактивная вкладка */}
+          <div className="bg-[#18181b] text-[#a1a1aa] text-[12px] px-3 py-2 rounded-t-lg flex items-center gap-2 ml-0.5 mt-1 min-w-[120px] max-w-[240px] hover:bg-[#1f1f23]">
+            <span className="text-[10px]">💻</span>
+            <span className="truncate flex-1">GitHub</span>
+            <button className="w-4 h-4 flex items-center justify-center rounded hover:bg-red-500/30 text-[#52525b] hover:text-[#fafafa] text-[10px] flex-shrink-0 opacity-0 hover:opacity-100">×</button>
+          </div>
+
+          {/* Кнопка новой вкладки */}
+          <button className="w-8 h-7 flex items-center justify-center rounded-md text-[#71717a] hover:bg-[#1a1a1d] hover:text-[#fafafa] text-sm mt-1 ml-1">+</button>
+
+          {/* Спейсер */}
           <div className="flex-1" />
-          <button className="w-11 h-9 flex items-center justify-center text-[#71717a] hover:bg-[#1a1a1d] hover:text-[#fafafa] transition-colors text-xs">—</button>
-          <button className="w-11 h-9 flex items-center justify-center text-[#71717a] hover:bg-[#1a1a1d] hover:text-[#fafafa] transition-colors text-xs">□</button>
-          <button className="w-11 h-9 flex items-center justify-center text-[#71717a] hover:bg-[#ef4444] hover:text-white transition-colors text-xs">✕</button>
+
+          {/* Кнопки управления окном — справа, как в Chrome */}
+          <div className="flex items-center">
+            <button className="w-[46px] h-[38px] flex items-center justify-center text-[#71717a] hover:bg-[#1a1a1d] hover:text-[#fafafa] transition-colors text-[11px]">—</button>
+            <button className="w-[46px] h-[38px] flex items-center justify-center text-[#71717a] hover:bg-[#1a1a1d] hover:text-[#fafafa] transition-colors text-[11px]">□</button>
+            <button className="w-[46px] h-[38px] flex items-center justify-center text-[#71717a] hover:bg-[#ef4444] hover:text-white transition-colors text-[11px]">✕</button>
+          </div>
         </div>
 
-        {/* Tab bar */}
-        <div className="bg-[#111113] flex items-end px-2 pt-1">
-          <div className="bg-[#0a0a0c] text-[#fafafa] text-[12px] px-4 py-2 rounded-t-md flex items-center gap-2 border-t-2 border-t-[#10b981]">
-            <span className="text-[#10b981]">◉</span> Google
-            <span className="text-[#52525b] ml-2 hover:text-[#fafafa] cursor-pointer">×</span>
-          </div>
-          <div className="text-[#71717a] text-[12px] px-4 py-2 flex items-center gap-2">
-            <span>💻</span> GitHub
-            <span className="text-[#52525b] ml-2 hover:text-[#fafafa] cursor-pointer">×</span>
-          </div>
-          <button className="text-[#52525b] hover:text-[#a1a1aa] px-2 py-1 text-sm">+</button>
-        </div>
-
-        {/* Toolbar */}
-        <div className="bg-[#111113] px-3 py-2 flex items-center gap-1.5 border-b border-[#222225]">
+        {/* Toolbar — под вкладками */}
+        <div className="bg-[#0a0a0c] px-3 py-2 flex items-center gap-1.5 border-b border-[#222225]">
           {['←', '→', '⟳', '⌂'].map((b, i) => (
-            <button key={i} className="w-8 h-8 rounded-md text-[#a1a1aa] hover:bg-[#1a1a1d] hover:text-[#fafafa] text-sm">
+            <button key={i} className="w-8 h-8 rounded-full text-[#a1a1aa] hover:bg-[#1a1a1d] hover:text-[#fafafa] text-sm flex items-center justify-center">
               {b}
             </button>
           ))}
-          <div className="flex-1 bg-[#0a0a0c] border border-[#222225] rounded-md px-3 py-1.5 text-[12px] text-[#a1a1aa] flex items-center gap-2">
-            <span className="text-[#10b981]">🔒</span>
-            https://www.google.com
+          <div className="flex-1 bg-[#27272a] rounded-full px-4 py-1.5 text-[12px] text-[#a1a1aa] flex items-center gap-2">
+            <span className="text-[#10b981] text-[11px]">🔒</span>
+            <span className="text-[#fafafa]">https://</span>www.google.com
           </div>
-          <button className="w-8 h-8 rounded-md text-[#a1a1aa] hover:bg-[#1a1a1d] text-sm">⚙</button>
+          <button className="w-8 h-8 rounded-full text-[#a1a1aa] hover:bg-[#1a1a1d] hover:text-[#fafafa] text-sm flex items-center justify-center">⭐</button>
+          <button className="w-8 h-8 rounded-full text-[#a1a1aa] hover:bg-[#1a1a1d] hover:text-[#fafafa] text-sm flex items-center justify-center">🧩</button>
+          <button className="w-8 h-8 rounded-full text-[#a1a1aa] hover:bg-[#1a1a1d] hover:text-[#fafafa] text-sm flex items-center justify-center">⋮</button>
         </div>
 
         {/* Content */}
