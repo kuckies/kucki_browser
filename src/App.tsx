@@ -14,7 +14,7 @@ import sys
 from PyQt5.QtCore import QUrl, Qt, QSize, QSettings, QRect
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QLineEdit, QPushButton, QToolBar,
-    QTabWidget, QMenu, QAction, QStatusBar, QLabel, QMessageBox,
+    QTabWidget, QTabBar, QMenu, QAction, QStatusBar, QLabel, QMessageBox,
     QShortcut, QWidget, QVBoxLayout, QHBoxLayout, QFrame,
     QListWidget, QListWidgetItem, QStackedWidget, QCheckBox,
     QComboBox, QSpinBox, QRadioButton, QButtonGroup, QScrollArea
@@ -424,7 +424,6 @@ class TabBar(QWidget):
         self.setStyleSheet("""
             TabBar {
                 background: #0a0a0c;
-                border-bottom: 1px solid #222225;
             }
         """)
 
@@ -435,19 +434,15 @@ class TabBar(QWidget):
 
         # Логотип слева
         logo = QLabel("🚀")
-        logo.setStyleSheet("font-size: 13px; padding: 0 8px;")
+        logo.setStyleSheet("font-size: 13px; padding: 0 8px; background: transparent;")
         layout.addWidget(logo)
 
-        # Вкладки (QTabWidget без рамок)
-        self.tabs = QTabWidget()
-        self.tabs.setDocumentMode(True)
-        self.tabs.setTabsClosable(True)
-        self.tabs.setMovable(True)
-        self.tabs.setStyleSheet("""
-            QTabWidget::pane {
-                border: none;
-                background: #0a0a0c;
-            }
+        # QTabBar (только полоска вкладок, без QTabWidget)
+        self.tab_bar = QTabBar()
+        self.tab_bar.setDocumentMode(True)
+        self.tab_bar.setTabsClosable(True)
+        self.tab_bar.setMovable(True)
+        self.tab_bar.setStyleSheet("""
             QTabBar {
                 background: transparent;
             }
@@ -480,7 +475,7 @@ class TabBar(QWidget):
                 border-radius: 3px;
             }
         """)
-        layout.addWidget(self.tabs, 1)
+        layout.addWidget(self.tab_bar, 1)
 
         # Кнопка "+" для новой вкладки
         new_tab_btn = QPushButton("+")
@@ -753,44 +748,81 @@ class KuckiBrowser(QMainWindow):
         main_layout.setSpacing(0)
 
         # TabBar = вкладки + кнопки окна в одной строке (как в Chrome)
-        self.tab_bar = TabBar()
-        main_layout.addWidget(self.tab_bar)
-        self.tabs = self.tab_bar.tabs
+        self.tab_bar_widget = TabBar()
+        main_layout.addWidget(self.tab_bar_widget)
 
-        # Подключаем сигналы вкладок
-        self.tabs.tabCloseRequested.connect(self._close_tab)
+        # QTabWidget для контента вкладок
+        self.tabs = QTabWidget()
+        self.tabs.setDocumentMode(True)
+        self.tabs.setStyleSheet("""
+            QTabWidget::pane {
+                border: none;
+                background: #0a0a0c;
+            }
+            QTabBar {
+                height: 0px;
+            }
+        """)
+        main_layout.addWidget(self.tabs, 1)
+
+        # Подключаем сигналы QTabBar к QTabWidget
+        self.tab_bar_widget.tab_bar.currentChanged.connect(self.tabs.setCurrentIndex)
+        self.tab_bar_widget.tab_bar.tabCloseRequested.connect(self._close_tab_bar)
         self.tabs.currentChanged.connect(self._on_tab_changed)
 
-        # Toolbar (адресная строка, навигация)
-        tb = QToolBar()
-        tb.setMovable(False)
-        tb.setIconSize(QSize(18, 18))
-        main_layout.addWidget(tb)
-
-        self.setCentralWidget(central)
+        # Toolbar (адресная строка, навигация) — как обычный QWidget
+        toolbar = QWidget()
+        toolbar.setFixedHeight(44)
+        toolbar.setStyleSheet("""
+            QWidget {
+                background: #111113;
+                border-bottom: 1px solid #222225;
+            }
+        """)
+        tb_layout = QHBoxLayout(toolbar)
+        tb_layout.setContentsMargins(8, 4, 8, 4)
+        tb_layout.setSpacing(4)
 
         self.back_btn = QPushButton("←")
         self.fwd_btn = QPushButton("→")
         self.reload_btn = QPushButton("⟳")
         self.home_btn = QPushButton("⌂")
-        self.settings_btn = QPushButton("⚙")
 
         self.back_btn.clicked.connect(lambda: self._cur().back())
         self.fwd_btn.clicked.connect(lambda: self._cur().forward())
         self.reload_btn.clicked.connect(lambda: self._cur().reload())
         self.home_btn.clicked.connect(self._go_home)
-        self.settings_btn.clicked.connect(self._open_settings)
 
         self.url_bar = QLineEdit()
         self.url_bar.setPlaceholderText("Поиск или URL")
         self.url_bar.returnPressed.connect(self._navigate)
+        self.url_bar.setStyleSheet("""
+            QLineEdit {
+                background: #27272a;
+                border: none;
+                border-radius: 20px;
+                color: #fafafa;
+                padding: 8px 16px;
+                font-size: 13px;
+            }
+            QLineEdit:focus {
+                border: 1px solid #10b981;
+            }
+        """)
 
-        tb.addWidget(self.back_btn)
-        tb.addWidget(self.fwd_btn)
-        tb.addWidget(self.reload_btn)
-        tb.addWidget(self.home_btn)
-        tb.addWidget(self.url_bar)
-        tb.addWidget(self.settings_btn)
+        self.settings_btn = QPushButton("⋮")
+        self.settings_btn.clicked.connect(self._open_settings)
+
+        tb_layout.addWidget(self.back_btn)
+        tb_layout.addWidget(self.fwd_btn)
+        tb_layout.addWidget(self.reload_btn)
+        tb_layout.addWidget(self.home_btn)
+        tb_layout.addWidget(self.url_bar, 1)
+        tb_layout.addWidget(self.settings_btn)
+
+        main_layout.addWidget(toolbar)
+
+        self.setCentralWidget(central)
 
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
@@ -807,27 +839,42 @@ class KuckiBrowser(QMainWindow):
     def new_tab(self, url=""):
         b = QWebEngineView()
         b.setUrl(QUrl(url or "https://google.com"))
+        # Добавляем в QTabWidget (контент)
         i = self.tabs.addTab(b, "Новая вкладка")
+        # Добавляем вкладку в QTabBar (отображение)
+        self.tab_bar_widget.tab_bar.addTab("Новая вкладка")
         self.tabs.setCurrentIndex(i)
+        self.tab_bar_widget.tab_bar.setCurrentIndex(i)
         b.titleChanged.connect(lambda t, br=b: self._set_title(br, t))
         b.urlChanged.connect(lambda q, br=b: self._on_url(br, q))
 
     def _set_title(self, b, t):
         i = self.tabs.indexOf(b)
         if i >= 0:
-            self.tabs.setTabText(i, (t[:25]+"…") if len(t)>25 else t)
+            display = (t[:25]+"…") if len(t)>25 else t
+            self.tabs.setTabText(i, display)
+            self.tab_bar_widget.tab_bar.setTabText(i, display)
 
     def _on_url(self, b, q):
         if b == self._cur():
             self.url_bar.setText(q.toString())
 
     def _on_tab_changed(self, i):
+        # Синхронизируем QTabBar с QTabWidget
+        self.tab_bar_widget.tab_bar.setCurrentIndex(i)
         if i >= 0 and self.tabs.widget(i):
             self.url_bar.setText(self.tabs.widget(i).url().toString())
 
+    def _close_tab_bar(self, i):
+        """Закрытие вкладки из QTabBar"""
+        self._close_tab(i)
+
     def _close_tab(self, i):
-        if self.tabs.count() > 1: self.tabs.removeTab(i)
-        else: self.new_tab()
+        if self.tabs.count() > 1:
+            self.tabs.removeTab(i)
+            self.tab_bar_widget.tab_bar.removeTab(i)
+        else:
+            self.new_tab()
 
     def _close_current(self):
         self._close_tab(self.tabs.currentIndex())
