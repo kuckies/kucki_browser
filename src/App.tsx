@@ -11,7 +11,7 @@ const mainCode = `# ============================================================
 # ============================================================
 
 import sys
-from PyQt5.QtCore import QUrl, Qt, QSize, QSettings
+from PyQt5.QtCore import QUrl, Qt, QSize, QSettings, QRect
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QLineEdit, QPushButton, QToolBar,
     QTabWidget, QMenu, QAction, QStatusBar, QLabel, QMessageBox,
@@ -413,9 +413,114 @@ class SettingsWindow(QMainWindow):
 # KUCKI BROWSER — основное окно
 # ============================================================
 
+class TitleBar(QWidget):
+    """Кастомная панель заголовка (заменяет стандартную Windows-рамку)"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFixedHeight(38)
+        self._build_ui()
+        self._drag_pos = None
+        self.setStyleSheet("""
+            TitleBar {
+                background: #111113;
+                border-bottom: 1px solid #222225;
+            }
+        """)
+
+    def _build_ui(self):
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 0, 0, 0)
+        layout.setSpacing(8)
+
+        # Логотип
+        logo = QLabel("🚀")
+        logo.setStyleSheet("font-size: 14px")
+        layout.addWidget(logo)
+
+        # Заголовок
+        title = QLabel("Kucki Browser")
+        title.setStyleSheet("color: #a1a1aa; font-size: 12px; font-weight: 500")
+        layout.addWidget(title)
+
+        layout.addStretch()
+
+        # Кнопки управления окном
+        btn_style = """
+            QPushButton {
+                background: transparent;
+                border: none;
+                color: #71717a;
+                width: 46px;
+                height: 38px;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background: #1a1a1d;
+                color: #fafafa;
+            }
+        """
+        close_style = """
+            QPushButton {
+                background: transparent;
+                border: none;
+                color: #71717a;
+                width: 46px;
+                height: 38px;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background: #ef4444;
+                color: #ffffff;
+            }
+        """
+
+        self.minimize_btn = QPushButton("—")
+        self.minimize_btn.setStyleSheet(btn_style)
+        self.minimize_btn.clicked.connect(lambda: self.window().showMinimized())
+
+        self.maximize_btn = QPushButton("□")
+        self.maximize_btn.setStyleSheet(btn_style)
+        self.maximize_btn.clicked.connect(self._toggle_maximize)
+
+        self.close_btn = QPushButton("✕")
+        self.close_btn.setStyleSheet(close_style)
+        self.close_btn.clicked.connect(lambda: self.window().close())
+
+        layout.addWidget(self.minimize_btn)
+        layout.addWidget(self.maximize_btn)
+        layout.addWidget(self.close_btn)
+
+    def _toggle_maximize(self):
+        win = self.window()
+        if win.isMaximized():
+            win.showNormal()
+            self.maximize_btn.setText("□")
+        else:
+            win.showMaximized()
+            self.maximize_btn.setText("❐")
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._drag_pos = event.globalPos() - self.window().frameGeometry().topLeft()
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() == Qt.LeftButton and self._drag_pos:
+            self.window().move(event.globalPos() - self._drag_pos)
+            event.accept()
+
+    def mouseDoubleClickEvent(self, event):
+        self._toggle_maximize()
+
+
 class KuckiBrowser(QMainWindow):
     def __init__(self):
         super().__init__()
+        # Убираем стандартную рамку Windows
+        self.setWindowFlags(Qt.FramelessWindowHint)
+        self.setAttribute(Qt.WA_TranslucentBackground, False)
+
         self.setWindowTitle("Kucki Browser")
         self.resize(1400, 900)
 
@@ -424,6 +529,83 @@ class KuckiBrowser(QMainWindow):
         self._apply_theme()
         self._build_ui()
         self.new_tab()
+
+        # Для изменения размера окна за края
+        self._resizing = False
+        self._resize_dir = None
+        self._resize_margin = 8  #_pixels от края для активации resize
+
+    def _get_resize_direction(self, pos):
+        """Определяет направление изменения размера по позиции курсора"""
+        rect = self.rect()
+        edge = 0
+
+        if pos.x() <= self._resize_margin:
+            edge |= Qt.LeftEdge
+        if pos.x() >= rect.width() - self._resize_margin:
+            edge |= Qt.RightEdge
+        if pos.y() <= self._resize_margin:
+            edge |= Qt.TopEdge
+        if pos.y() >= rect.height() - self._resize_margin:
+            edge |= Qt.BottomEdge
+
+        return edge
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            resize_dir = self._get_resize_direction(event.pos())
+            if resize_dir != 0:
+                self._resizing = True
+                self._resize_dir = resize_dir
+                self._resize_start_pos = event.globalPos()
+                self._resize_start_size = self.size()
+                self._resize_start_geom = self.geometry()
+                event.accept()
+                return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._resizing:
+            delta = event.globalPos() - self._resize_start_pos
+            geom = QRect(self._resize_start_geom)
+
+            if self._resize_dir & Qt.RightEdge:
+                geom.setWidth(max(400, self._resize_start_size.width() + delta.x()))
+            if self._resize_dir & Qt.BottomEdge:
+                geom.setHeight(max(300, self._resize_start_size.height() + delta.y()))
+            if self._resize_dir & Qt.LeftEdge:
+                new_width = max(400, self._resize_start_size.width() - delta.x())
+                geom.setLeft(geom.left() + (self._resize_start_size.width() - new_width))
+                geom.setWidth(new_width)
+            if self._resize_dir & Qt.TopEdge:
+                new_height = max(300, self._resize_start_size.height() - delta.y())
+                geom.setTop(geom.top() + (self._resize_start_size.height() - new_height))
+                geom.setHeight(new_height)
+
+            self.setGeometry(geom)
+            event.accept()
+            return
+
+        # Изменяем курсор у краёв
+        resize_dir = self._get_resize_direction(event.pos())
+        if resize_dir == Qt.LeftEdge | Qt.TopEdge or resize_dir == Qt.RightEdge | Qt.BottomEdge:
+            self.setCursor(Qt.SizeFDiagCursor)
+        elif resize_dir == Qt.RightEdge | Qt.TopEdge or resize_dir == Qt.LeftEdge | Qt.BottomEdge:
+            self.setCursor(Qt.SizeBDiagCursor)
+        elif resize_dir & (Qt.LeftEdge | Qt.RightEdge):
+            self.setCursor(Qt.SizeHorCursor)
+        elif resize_dir & (Qt.TopEdge | Qt.BottomEdge):
+            self.setCursor(Qt.SizeVerCursor)
+        else:
+            self.setCursor(Qt.ArrowCursor)
+
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        self._resizing = False
+        self._resize_dir = None
+        self.setCursor(Qt.ArrowCursor)
+        super().mouseReleaseEvent(event)
 
     def _apply_theme(self):
         p = QPalette()
@@ -446,6 +628,7 @@ class KuckiBrowser(QMainWindow):
 
         self.setStyleSheet(f"""
             QMainWindow {{ background: {bg.name()}; }}
+            QWidget {{ background: {bg.name()}; }}
             QToolBar {{
                 background: {surface.name()};
                 border: none;
@@ -502,12 +685,25 @@ class KuckiBrowser(QMainWindow):
         """)
 
     def _build_ui(self):
+        # Главный контейнер с кастомным title bar
+        central = QWidget()
+        main_layout = QVBoxLayout(central)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        # Кастомный title bar (заменяет Windows-рамку)
+        self.title_bar = TitleBar()
+        main_layout.addWidget(self.title_bar)
+
+        # Вкладки
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(True)
         self.tabs.setTabsClosable(True)
         self.tabs.tabCloseRequested.connect(self._close_tab)
         self.tabs.currentChanged.connect(self._on_tab_changed)
-        self.setCentralWidget(self.tabs)
+        main_layout.addWidget(self.tabs, 1)
+
+        self.setCentralWidget(central)
 
         tb = QToolBar(); tb.setMovable(False)
         self.addToolBar(tb)
@@ -647,18 +843,20 @@ function App() {
 
   return (
     <div className="min-h-screen bg-[#0a0a0c] text-[#fafafa] font-sans antialiased">
-      {/* Top bar — browser-like tabs */}
+      {/* Top bar — custom title bar + tabs */}
       <div className="sticky top-0 z-50 bg-[#111113] border-b border-[#222225]">
-        <div className="flex items-center">
-          {/* Traffic lights */}
-          <div className="flex items-center gap-2 px-4 py-3">
-            <div className="w-3 h-3 rounded-full bg-[#ff5f57]" />
-            <div className="w-3 h-3 rounded-full bg-[#febc2e]" />
-            <div className="w-3 h-3 rounded-full bg-[#28c840]" />
-          </div>
+        {/* Custom title bar */}
+        <div className="flex items-center px-4 py-2 border-b border-[#1a1a1d]">
+          <span className="text-sm mr-2">🚀</span>
+          <span className="text-[11px] text-[#71717a] font-medium">Kucki Browser</span>
+          <div className="flex-1" />
+          <button className="w-11 h-9 flex items-center justify-center text-[#71717a] hover:bg-[#1a1a1d] hover:text-[#fafafa] transition-colors text-xs">—</button>
+          <button className="w-11 h-9 flex items-center justify-center text-[#71717a] hover:bg-[#1a1a1d] hover:text-[#fafafa] transition-colors text-xs">□</button>
+          <button className="w-11 h-9 flex items-center justify-center text-[#71717a] hover:bg-[#ef4444] hover:text-white transition-colors text-xs">✕</button>
+        </div>
 
-          {/* Tabs */}
-          <div className="flex items-end pt-2">
+        {/* Tabs */}
+        <div className="flex items-end pt-2 px-2">
             {sections.map(s => (
               <button
                 key={s.id}
@@ -673,8 +871,6 @@ function App() {
                 {s.label}
               </button>
             ))}
-          </div>
-          <div className="flex-1" />
         </div>
       </div>
 
@@ -729,14 +925,14 @@ function PreviewSection() {
 
       {/* Browser mockup */}
       <div className="rounded-xl overflow-hidden border border-[#222225] shadow-2xl shadow-black/40">
-        {/* Title bar */}
-        <div className="bg-[#111113] px-4 py-2.5 flex items-center gap-2 border-b border-[#222225]">
-          <div className="flex gap-1.5">
-            <div className="w-3 h-3 rounded-full bg-[#ff5f57]" />
-            <div className="w-3 h-3 rounded-full bg-[#febc2e]" />
-            <div className="w-3 h-3 rounded-full bg-[#28c840]" />
-          </div>
-          <div className="flex-1 text-center text-[11px] text-[#71717a]">Kucki Browser</div>
+        {/* Custom title bar (FramelessWindowHint) */}
+        <div className="bg-[#111113] px-4 py-2 flex items-center gap-3 border-b border-[#222225]">
+          <span className="text-sm">🚀</span>
+          <span className="text-[11px] text-[#71717a] font-medium">Kucki Browser</span>
+          <div className="flex-1" />
+          <button className="w-11 h-9 flex items-center justify-center text-[#71717a] hover:bg-[#1a1a1d] hover:text-[#fafafa] transition-colors text-xs">—</button>
+          <button className="w-11 h-9 flex items-center justify-center text-[#71717a] hover:bg-[#1a1a1d] hover:text-[#fafafa] transition-colors text-xs">□</button>
+          <button className="w-11 h-9 flex items-center justify-center text-[#71717a] hover:bg-[#ef4444] hover:text-white transition-colors text-xs">✕</button>
         </div>
 
         {/* Tab bar */}
