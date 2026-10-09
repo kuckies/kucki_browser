@@ -1,1140 +1,1242 @@
 import { useState } from 'react';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
+type Section = 'preview' | 'extensions' | 'settings' | 'code' | 'shortcuts';
+
+// ============ CODE ============
 const mainCode = `import sys
-from PyQt5.QtCore import QUrl, Qt, QSize, pyqtSignal, QObject
+from PyQt5.QtCore import QUrl, Qt, QSize, QSettings
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QLineEdit, QPushButton, QToolBar,
-    QTabWidget, QWidget, QVBoxLayout, QHBoxLayout, QMenu, QAction,
-    QStatusBar, QLabel, QComboBox, QInputDialog, QMessageBox,
-    QToolButton, QFrame, QSplitter, QShortcut
+    QTabWidget, QMenu, QAction, QStatusBar, QLabel, QMessageBox,
+    QShortcut, QWidget, QVBoxLayout, QHBoxLayout, QFrame,
+    QListWidget, QListWidgetItem, QStackedWidget, QCheckBox,
+    QComboBox, QSpinBox, QRadioButton, QButtonGroup, QScrollArea
 )
-from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEnginePage
-from PyQt5.QtGui import QKeySequence, QIcon, QFont, QPalette, QColor
-from PyQt5.QtCore import QSettings
+from PyQt5.QtWebEngineWidgets import QWebEngineView
+from PyQt5.QtGui import QKeySequence, QFont, QPalette, QColor
 
 
 # ============================================================
-# СИСТЕМА РАСШИРЕНИЙ
+# РАСШИРЕНИЯ (как в Chrome)
+# ============================================================
+
+class Extension:
+    """Базовый класс расширения"""
+    def __init__(self, ext_id, name, version, description, icon, author=""):
+        self.id = ext_id
+        self.name = name
+        self.version = version
+        self.description = description
+        self.icon = icon
+        self.author = author
+        self.enabled = False
+
+    def on_load(self, page): pass
+    def on_url(self, url): pass
+
+
+class DarkModeExt(Extension):
+    def __init__(self):
+        super().__init__("dark-mode", "Тёмный режим", "1.2.0",
+            "Принудительная тёмная тема на всех сайтах", "🌙", "Browser Team")
+
+    def on_load(self, page):
+        page.runJavaScript("""
+            var s=document.createElement('style');
+            s.textContent='html{filter:invert(.88) hue-rotate(180deg)!important}img,video{filter:invert(1) hue-rotate(180deg)!important}';
+            document.head.appendChild(s);
+        """)
+
+
+class AdBlockerExt(Extension):
+    def __init__(self):
+        super().__init__("ad-blocker", "Блокировщик рекламы", "2.0.1",
+            "Удаляет баннеры, попапы и трекеры", "🛡️", "Browser Team")
+
+    def on_load(self, page):
+        page.runJavaScript("""
+            window.open=function(){return null};
+            document.querySelectorAll('[class*=ad],[id*=banner],.adsbygoogle')
+                .forEach(e=>e.remove());
+        """)
+
+
+class ReaderExt(Extension):
+    def __init__(self):
+        super().__init__("reader", "Режим чтения", "1.0.0",
+            "Убирает всё лишнее, оставляя только текст", "📖", "Browser Team")
+
+
+class BookmarksExt(Extension):
+    def __init__(self):
+        super().__init__("bookmarks", "Закладки", "1.1.0",
+            "Управление закладками с синхронизацией", "⭐", "Browser Team")
+        self.items = []
+        self._load()
+
+    def _load(self):
+        s = QSettings("MyBrowser", "Bookmarks")
+        n = s.beginReadArray("items")
+        for i in range(n):
+            s.setArrayIndex(i)
+            self.items.append({"t": s.value("t"), "u": s.value("u")})
+        s.endArray()
+
+    def add(self, title, url):
+        self.items.append({"t": title, "u": url})
+        self._save()
+
+    def _save(self):
+        s = QSettings("MyBrowser", "Bookmarks")
+        s.beginWriteArray("items")
+        for i, b in enumerate(self.items):
+            s.setArrayIndex(i)
+            s.setValue("t", b["t"]); s.setValue("u", b["u"])
+        s.endArray()
+
+
+class SpeedDialExt(Extension):
+    def __init__(self):
+        super().__init__("speed-dial", "Быстрый набор", "1.0.0",
+            "Стартовая страница с избранными сайтами", "🏠", "Browser Team")
+
+
+# ============================================================
+# МЕНЕДЖЕР РАСШИРЕНИЙ
 # ============================================================
 
 class ExtensionManager:
-    """Менеджер расширений для браузера"""
-
     def __init__(self):
         self.extensions = {}
-        self.enabled_extensions = set()
-        self.load_settings()
+        self._register_defaults()
+        self._load_state()
 
-    def load_settings(self):
-        """Загрузка настроек расширений"""
-        settings = QSettings("MyBrowser", "Extensions")
-        enabled = settings.value("enabled", [])
-        if enabled:
-            self.enabled_extensions = set(enabled)
+    def _register_defaults(self):
+        for ext in [DarkModeExt(), AdBlockerExt(), ReaderExt(),
+                    BookmarksExt(), SpeedDialExt()]:
+            self.extensions[ext.id] = ext
 
-    def save_settings(self):
-        """Сохранение настроек расширений"""
-        settings = QSettings("MyBrowser", "Extensions")
-        settings.setValue("enabled", list(self.enabled_extensions))
+    def _load_state(self):
+        s = QSettings("MyBrowser", "Extensions")
+        enabled = s.value("enabled", []) or []
+        for ext_id in enabled:
+            if ext_id in self.extensions:
+                self.extensions[ext_id].enabled = True
 
-    def register_extension(self, name, extension):
-        """Регистрация нового расширения"""
-        self.extensions[name] = extension
+    def _save_state(self):
+        s = QSettings("MyBrowser", "Extensions")
+        s.setValue("enabled", [e.id for e in self.extensions.values() if e.enabled])
 
-    def toggle_extension(self, name):
-        """Включить/выключить расширение"""
-        if name in self.enabled_extensions:
-            self.enabled_extensions.remove(name)
-        else:
-            self.enabled_extensions.add(name)
-        self.save_settings()
+    def toggle(self, ext_id):
+        if ext_id in self.extensions:
+            self.extensions[ext_id].enabled = not self.extensions[ext_id].enabled
+            self._save_state()
 
-    def is_enabled(self, name):
-        """Проверить, включено ли расширение"""
-        return name in self.enabled_extensions
-
-    def get_enabled_extensions(self):
-        """Получить список включённых расширений"""
-        return [self.extensions[name] for name in self.enabled_extensions
-                if name in self.extensions]
+    def remove(self, ext_id):
+        if ext_id in self.extensions:
+            del self.extensions[ext_id]
+            self._save_state()
 
 
-class Extension:
-    """Базовый класс для расширений"""
+# ============================================================
+# НАСТРОЙКИ БРАУЗЕРА
+# ============================================================
 
-    def __init__(self, name, description, icon="🧩"):
-        self.name = name
-        self.description = description
-        self.icon = icon
-        self.enabled = False
-
-    def on_page_loaded(self, page):
-        """Вызывается при загрузке страницы"""
-        pass
-
-    def on_url_changed(self, url):
-        """Вызывается при изменении URL"""
-        pass
-
-    def get_toolbar_widget(self):
-        """Возвращает виджет для панели инструментов (или None)"""
-        return None
-
-
-# --- Встроенные расширения ---
-
-class DarkModeExtension(Extension):
-    """Принудительная тёмная тема для всех сайтов"""
-
+class BrowserSettings:
     def __init__(self):
-        super().__init__(
-            "Тёмный режим",
-            "Принудительно включает тёмную тему на всех сайтах",
-            "🌙"
-        )
+        self.s = QSettings("MyBrowser", "Config")
+        self.load()
 
-    def on_page_loaded(self, page):
-        dark_css = """
-        html {
-            filter: invert(0.85) hue-rotate(180deg) !important;
-            background: #1a1a2e !important;
-        }
-        img, video, canvas, svg {
-            filter: invert(1) hue-rotate(180deg) !important;
-        }
-        """
-        page.runJavaScript(f"""
-            var style = document.createElement('style');
-            style.textContent = \`{dark_css}\`;
-            document.head.appendChild(style);
-        """)
+    def load(self):
+        self.homepage = self.s.value("homepage", "speed-dial://newtab")
+        self.search_engine = self.s.value("search", "google")
+        self.theme = self.s.value("theme", "dark")
+        self.font_size = int(self.s.value("fontSize", 14))
+        self.restore_tabs = self.s.value("restoreTabs", True, type=bool)
+        self.block_popups = self.s.value("blockPopups", True, type=bool)
+        self.do_not_track = self.s.value("doNotTrack", False, type=bool)
+        self.clear_on_exit = self.s.value("clearOnExit", False, type=bool)
 
-
-class AdBlockerExtension(Extension):
-    """Базовый блокировщик рекламы"""
-
-    def __init__(self):
-        super().__init__(
-            "Блокировщик рекламы",
-            "Блокирует всплывающие окна и баннеры",
-            "🛡️"
-        )
-        self.blocked_count = 0
-
-    def on_page_loaded(self, page):
-        ad_block_js = """
-        // Удаление всплывающих окон
-        window.open = function() { return null; };
-
-        // Удаление рекламных элементов
-        var adSelectors = [
-            '[class*="ad-"]', '[class*="ads-"]', '[id*="ad-"]',
-            '[class*="banner"]', '[id*="banner"]',
-            '[class*="popup"]', '[id*="popup"]',
-            '.advertisement', '.ad-container', '.adsbygoogle'
-        ];
-        adSelectors.forEach(function(sel) {
-            document.querySelectorAll(sel).forEach(function(el) {
-                el.remove();
-            });
-        });
-        """
-        page.runJavaScript(ad_block_js)
+    def save(self):
+        self.s.setValue("homepage", self.homepage)
+        self.s.setValue("search", self.search_engine)
+        self.s.setValue("theme", self.theme)
+        self.s.setValue("fontSize", self.font_size)
+        self.s.setValue("restoreTabs", self.restore_tabs)
+        self.s.setValue("blockPopups", self.block_popups)
+        self.s.setValue("doNotTrack", self.do_not_track)
+        self.s.setValue("clearOnExit", self.clear_on_exit)
 
 
-class ReaderModeExtension(Extension):
-    """Режим чтения — убирает всё лишнее"""
+# ============================================================
+# ОКНО НАСТРОЕК
+# ============================================================
 
-    def __init__(self):
-        super().__init__(
-            "Режим чтения",
-            "Убирает всё лишнее, оставляя только текст",
-            "📖"
-        )
+class SettingsWindow(QMainWindow):
+    def __init__(self, settings, ext_manager, parent=None):
+        super().__init__(parent)
+        self.settings = settings
+        self.ext_manager = ext_manager
+        self.setWindowTitle("Настройки")
+        self.resize(900, 650)
+        self._build_ui()
 
-    def get_toolbar_widget(self):
-        btn = QPushButton("📖")
-        btn.setToolTip("Режим чтения")
-        btn.setStyleSheet("""
-            QPushButton {
-                background: transparent;
-                border: none;
-                font-size: 18px;
-                padding: 5px;
-            }
-            QPushButton:hover {
-                background: rgba(255,255,255,0.1);
-                border-radius: 4px;
-            }
-        """)
-        return btn
+    def _build_ui(self):
+        central = QWidget()
+        self.setCentralWidget(central)
+        layout = QHBoxLayout(central)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
+        # Боковая навигация
+        sidebar = QWidget()
+        sidebar.setFixedWidth(220)
+        sidebar.setStyleSheet("background:#111113;border-right:1px solid #222225")
+        sb_layout = QVBoxLayout(sidebar)
+        sb_layout.setContentsMargins(12, 20, 12, 20)
 
-class BookmarkExtension(Extension):
-    """Менеджер закладок"""
+        title = QLabel("Настройки")
+        title.setStyleSheet("color:#fafafa;font-size:18px;font-weight:600")
+        sb_layout.addWidget(title)
+        sb_layout.addSpacing(16)
 
-    def __init__(self):
-        super().__init__(
-            "Закладки",
-            "Быстрое добавление и управление закладками",
-            "⭐"
-        )
-        self.bookmarks = []
-        self.load_bookmarks()
+        self.stack = QStackedWidget()
+        self.stack.setStyleSheet("background:#0a0a0c")
 
-    def load_bookmarks(self):
-        settings = QSettings("MyBrowser", "Bookmarks")
-        size = settings.beginReadArray("bookmarks")
-        for i in range(size):
-            settings.setArrayIndex(i)
-            self.bookmarks.append({
-                "title": settings.value("title"),
-                "url": settings.value("url")
-            })
-        settings.endArray()
-
-    def save_bookmarks(self):
-        settings = QSettings("MyBrowser", "Bookmarks")
-        settings.beginWriteArray("bookmarks")
-        for i, bm in enumerate(self.bookmarks):
-            settings.setArrayIndex(i)
-            settings.setValue("title", bm["title"])
-            settings.setValue("url", bm["url"])
-        settings.endArray()
-
-    def add_bookmark(self, title, url):
-        self.bookmarks.append({"title": title, "url": url})
-        self.save_bookmarks()
-
-    def remove_bookmark(self, index):
-        if 0 <= index < len(self.bookmarks):
-            self.bookmarks.pop(index)
-            self.save_bookmarks()
-
-    def get_bookmarks(self):
-        return self.bookmarks
-
-
-class SpeedDialExtension(Extension):
-    """Быстрый набор — стартовая страница с популярными сайтами"""
-
-    def __init__(self):
-        super().__init__(
-            "Быстрый набор",
-            "Стартовая страница с популярными сайтами",
-            "🏠"
-        )
-        self.sites = [
-            ("Google", "https://www.google.com", "🔍"),
-            ("YouTube", "https://www.youtube.com", "▶️"),
-            ("GitHub", "https://github.com", "💻"),
-            ("Wikipedia", "https://ru.wikipedia.org", "📚"),
-            ("Reddit", "https://www.reddit.com", "🤖"),
-            ("Stack Overflow", "https://stackoverflow.com", "📋"),
+        items = [
+            ("🎨  Внешний вид", self._page_appearance),
+            ("🔍  Поиск", self._page_search),
+            ("🧩  Расширения", self._page_extensions),
+            ("🔒  Приватность", self._page_privacy),
+            ("⌨️  Горячие клавиши", self._page_shortcuts),
         ]
+        for label, page_fn in items:
+            btn = QPushButton(label)
+            btn.setCheckable(True)
+            btn.setStyleSheet("""
+                QPushButton { text-align:left; background:transparent; border:none;
+                    color:#a1a1aa; padding:10px 14px; border-radius:8px; font-size:13px }
+                QPushButton:hover { background:#1a1a1d; color:#fafafa }
+                QPushButton:checked { background:#1a1a1d; color:#10b981 }
+            """)
+            btn.clicked.connect(lambda c, b=btn: self._select(b))
+            sb_layout.addWidget(btn)
 
-    def get_speed_dial_html(self):
-        cards = ""
-        for name, url, emoji in self.sites:
-            cards += f"""
-            <a href="{url}" class="card">
-                <span class="emoji">{emoji}</span>
-                <span class="name">{name}</span>
-            </a>
-            """
+        sb_layout.addStretch()
+        layout.addWidget(sidebar)
 
-        return f"""
-        <!DOCTYPE html>
-        <html>
-        <head>
-        <meta charset="utf-8">
-        <style>
-            * {{ margin: 0; padding: 0; box-sizing: border-box; }}
-            body {{
-                background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
-                min-height: 100vh;
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-                justify-content: center;
-                font-family: 'Segoe UI', sans-serif;
-                color: white;
-            }}
-            h1 {{
-                font-size: 2.5em;
-                margin-bottom: 10px;
-                text-shadow: 0 0 20px rgba(139, 92, 246, 0.5);
-            }}
-            .subtitle {{
-                color: #a5b4fc;
-                margin-bottom: 40px;
-                font-size: 1.1em;
-            }}
-            .grid {{
-                display: grid;
-                grid-template-columns: repeat(3, 1fr);
-                gap: 20px;
-                max-width: 600px;
-            }}
-            .card {{
-                background: rgba(255,255,255,0.08);
-                backdrop-filter: blur(10px);
-                border: 1px solid rgba(255,255,255,0.1);
-                border-radius: 16px;
-                padding: 25px;
-                text-decoration: none;
-                color: white;
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-                gap: 10px;
-                transition: all 0.3s ease;
-            }}
-            .card:hover {{
-                background: rgba(255,255,255,0.15);
-                transform: translateY(-5px);
-                box-shadow: 0 10px 30px rgba(139, 92, 246, 0.3);
-            }}
-            .emoji {{ font-size: 2.5em; }}
-            .name {{ font-size: 0.9em; opacity: 0.9; }}
-        </style>
-        </head>
-        <body>
-            <h1>🚀 Мой Браузер</h1>
-            <p class="subtitle">Быстрый набор</p>
-            <div class="grid">{cards}</div>
-        </body>
-        </html>
-        """
+        # Контент
+        self.stack.addWidget(self._page_appearance())
+        self.stack.addWidget(self._page_search())
+        self.stack.addWidget(self._page_extensions())
+        self.stack.addWidget(self._page_privacy())
+        self.stack.addWidget(self._page_shortcuts())
+        layout.addWidget(self.stack, 1)
+
+        # Активируем первый пункт
+        sb_layout.itemAt(3).widget().setChecked(True)
+
+    def _select(self, btn):
+        for w in btn.parent().findChildren(QPushButton):
+            w.setChecked(False)
+        btn.setChecked(True)
+        idx = ["🎨  Внешний вид","🔍  Поиск","🧩  Расширения",
+               "🔒  Приватность","⌨️  Горячие клавиши"].index(btn.text())
+        self.stack.setCurrentIndex(idx)
+
+    def _row(self, title, desc, widget):
+        f = QFrame()
+        f.setStyleSheet("border-bottom:1px solid #1a1a1d")
+        l = QHBoxLayout(f)
+        l.setContentsMargins(24, 16, 24, 16)
+        t = QVBoxLayout()
+        t.addWidget(QLabel(f'<b style="color:#fafafa">{title}</b>'))
+        t.addWidget(QLabel(f'<span style="color:#71717a;font-size:12px">{desc}</span>'))
+        l.addLayout(t, 1)
+        l.addWidget(widget)
+        return f
+
+    def _page_appearance(self):
+        w = QScrollArea()
+        w.setWidgetResizable(True)
+        w.setStyleSheet("QScrollArea{border:none}")
+        c = QWidget()
+        v = QVBoxLayout(c)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.setSpacing(0)
+
+        header = QLabel("   Внешний вид")
+        header.setStyleSheet("color:#71717a;font-size:11px;text-transform:uppercase;letter-spacing:1px;padding:20px 24px 8px")
+        v.addWidget(header)
+
+        # Тема
+        theme_box = QComboBox()
+        theme_box.addItems(["Тёмная", "Светлая", "Системная"])
+        theme_box.setStyleSheet("""QComboBox{background:#18181b;color:#fafafa;
+            border:1px solid #27272a;border-radius:6px;padding:6px 12px}""")
+        v.addWidget(self._row("Тема", "Цветовая схема интерфейса", theme_box))
+
+        # Размер шрифта
+        font_spin = QSpinBox()
+        font_spin.setRange(10, 24)
+        font_spin.setValue(self.settings.font_size)
+        font_spin.setStyleSheet("""QSpinBox{background:#18181b;color:#fafafa;
+            border:1px solid #27272a;border-radius:6px;padding:4px 8px}""")
+        v.addWidget(self._row("Размер шрифта", "Размер текста в интерфейсе", font_spin))
+
+        # Восстановление вкладок
+        restore_cb = QCheckBox()
+        restore_cb.setChecked(self.settings.restore_tabs)
+        v.addWidget(self._row("Восстанавливать вкладки",
+            "Открывать предыдущие вкладки при запуске", restore_cb))
+
+        v.addStretch()
+        w.setWidget(c)
+        return w
+
+    def _page_search(self):
+        w = QScrollArea(); w.setWidgetResizable(True)
+        w.setStyleSheet("QScrollArea{border:none}")
+        c = QWidget(); v = QVBoxLayout(c); v.setContentsMargins(0,0,0,0); v.setSpacing(0)
+
+        header = QLabel("   Поисковая система")
+        header.setStyleSheet("color:#71717a;font-size:11px;text-transform:uppercase;letter-spacing:1px;padding:20px 24px 8px")
+        v.addWidget(header)
+
+        group = QButtonGroup(self)
+        for sid, name in [("google","Google"),("duckduckgo","DuckDuckGo"),
+                          ("bing","Bing"),("yandex","Яндекс")]:
+            rb = QRadioButton(name)
+            rb.setStyleSheet("QRadioButton{color:#fafafa;padding:8px}")
+            if sid == self.settings.search_engine: rb.setChecked(True)
+            group.addButton(rb)
+            v.addWidget(self._row(name, f"Использовать {name} по умолчанию", rb))
+
+        v.addStretch()
+        w.setWidget(c)
+        return w
+
+    def _page_extensions(self):
+        w = QScrollArea(); w.setWidgetResizable(True)
+        w.setStyleSheet("QScrollArea{border:none}")
+        c = QWidget(); v = QVBoxLayout(c); v.setContentsMargins(0,0,0,0); v.setSpacing(0)
+
+        header = QLabel("   Установленные расширения")
+        header.setStyleSheet("color:#71717a;font-size:11px;text-transform:uppercase;letter-spacing:1px;padding:20px 24px 8px")
+        v.addWidget(header)
+
+        for ext in self.ext_manager.extensions.values():
+            cb = QCheckBox()
+            cb.setChecked(ext.enabled)
+            cb.stateChanged.connect(lambda s, eid=ext.id: self.ext_manager.toggle(eid))
+            v.addWidget(self._row(f"{ext.icon}  {ext.name}",
+                f"v{ext.version} · {ext.description}", cb))
+
+        v.addStretch()
+        w.setWidget(c)
+        return w
+
+    def _page_privacy(self):
+        w = QScrollArea(); w.setWidgetResizable(True)
+        w.setStyleSheet("QScrollArea{border:none}")
+        c = QWidget(); v = QVBoxLayout(c); v.setContentsMargins(0,0,0,0); v.setSpacing(0)
+
+        header = QLabel("   Конфиденциальность")
+        header.setStyleSheet("color:#71717a;font-size:11px;text-transform:uppercase;letter-spacing:1px;padding:20px 24px 8px")
+        v.addWidget(header)
+
+        v.addWidget(self._row("Блокировать всплывающие окна",
+            "Запретить сайтам открывать попапы",
+            self._cb(self.settings.block_popups, "blockPopups")))
+        v.addWidget(self._row("Do Not Track",
+            "Отправлять запрос DNT сайтам",
+            self._cb(self.settings.do_not_track, "doNotTrack")))
+        v.addWidget(self._row("Очищать данные при выходе",
+            "Удалять cookies и кеш при закрытии",
+            self._cb(self.settings.clear_on_exit, "clearOnExit")))
+
+        v.addStretch()
+        w.setWidget(c)
+        return w
+
+    def _cb(self, checked, key):
+        cb = QCheckBox(); cb.setChecked(checked)
+        cb.stateChanged.connect(lambda s, k=key: self._save_bool(k, s==2))
+        return cb
+
+    def _save_bool(self, key, val):
+        setattr(self.settings, key, val)
+        self.settings.save()
+
+    def _page_shortcuts(self):
+        w = QScrollArea(); w.setWidgetResizable(True)
+        w.setStyleSheet("QScrollArea{border:none}")
+        c = QWidget(); v = QVBoxLayout(c); v.setContentsMargins(24,20,24,20)
+
+        shortcuts = [
+            ("Ctrl+T", "Новая вкладка"),
+            ("Ctrl+W", "Закрыть вкладку"),
+            ("Ctrl+L", "Фокус на адресную строку"),
+            ("Ctrl+R", "Обновить страницу"),
+            ("Ctrl+D", "Добавить в закладки"),
+            ("Ctrl+Tab", "Следующая вкладка"),
+            ("Ctrl+Shift+Tab", "Предыдущая вкладка"),
+            ("Ctrl+,", "Открыть настройки"),
+        ]
+        for keys, action in shortcuts:
+            row = QFrame()
+            row.setStyleSheet("border-bottom:1px solid #1a1a1d")
+            hl = QHBoxLayout(row)
+            hl.setContentsMargins(0, 12, 0, 12)
+            hl.addWidget(QLabel(f'<span style="color:#fafafa">{action}</span>'))
+            hl.addStretch()
+            kbd = QLabel(keys)
+            kbd.setStyleSheet("""background:#18181b;color:#10b981;
+                border:1px solid #27272a;border-radius:6px;padding:4px 10px;
+                font-family:monospace;font-size:12px""")
+            hl.addWidget(kbd)
+            v.addWidget(row)
+
+        v.addStretch()
+        w.setWidget(c)
+        return w
 
 
 # ============================================================
 # ОСНОВНОЙ БРАУЗЕР
 # ============================================================
 
-class BrowserTab(QWebEngineView):
-    """Отдельная вкладка браузера"""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.loadProgress.connect(self._on_progress)
-
-    def _on_progress(self, progress):
-        pass  # Можно добавить индикатор загрузки
-
-
 class MyPersonalBrowser(QMainWindow):
-    """Главное окно браузера"""
-
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Мой Личный Браузер 🚀")
+        self.setWindowTitle("Мой Личный Браузер")
         self.resize(1400, 900)
 
-        # Инициализация менеджера расширений
+        self.settings = BrowserSettings()
         self.ext_manager = ExtensionManager()
-        self._register_default_extensions()
-
-        # Применение тёмной темы
-        self._apply_dark_theme()
-
-        # Создание интерфейса
-        self._create_ui()
-
-        # Открытие стартовой страницы
+        self._apply_theme()
+        self._build_ui()
         self.new_tab()
 
-    def _register_default_extensions(self):
-        """Регистрация встроенных расширений"""
-        self.dark_mode_ext = DarkModeExtension()
-        self.ad_blocker_ext = AdBlockerExtension()
-        self.reader_ext = ReaderModeExtension()
-        self.bookmark_ext = BookmarkExtension()
-        self.speed_dial_ext = SpeedDialExtension()
+    def _apply_theme(self):
+        p = QPalette()
+        bg = QColor("#0a0a0c")
+        surface = QColor("#111113")
+        border = QColor("#222225")
+        text = QColor("#fafafa")
+        muted = QColor("#a1a1aa")
+        accent = QColor("#10b981")
 
-        self.ext_manager.register_extension("dark_mode", self.dark_mode_ext)
-        self.ext_manager.register_extension("ad_blocker", self.ad_blocker_ext)
-        self.ext_manager.register_extension("reader_mode", self.reader_ext)
-        self.ext_manager.register_extension("bookmarks", self.bookmark_ext)
-        self.ext_manager.register_extension("speed_dial", self.speed_dial_ext)
+        p.setColor(QPalette.Window, bg)
+        p.setColor(QPalette.WindowText, text)
+        p.setColor(QPalette.Base, surface)
+        p.setColor(QPalette.Text, text)
+        p.setColor(QPalette.Button, surface)
+        p.setColor(QPalette.ButtonText, text)
+        p.setColor(QPalette.Highlight, accent)
+        p.setColor(QPalette.HighlightedText, QColor("#ffffff"))
+        QApplication.setPalette(p)
 
-    def _apply_dark_theme(self):
-        """Применение тёмной темы ко всему приложению"""
-        dark_palette = QPalette()
-
-        # Основные цвета
-        dark_color = QColor(26, 26, 46)
-        medium_color = QColor(36, 36, 62)
-        light_color = QColor(48, 48, 80)
-        text_color = QColor(226, 232, 240)
-        accent_color = QColor(139, 92, 246)
-
-        dark_palette.setColor(QPalette.Window, dark_color)
-        dark_palette.setColor(QPalette.WindowText, text_color)
-        dark_palette.setColor(QPalette.Base, medium_color)
-        dark_palette.setColor(QPalette.AlternateBase, dark_color)
-        dark_palette.setColor(QPalette.ToolTipBase, light_color)
-        dark_palette.setColor(QPalette.ToolTipText, text_color)
-        dark_palette.setColor(QPalette.Text, text_color)
-        dark_palette.setColor(QPalette.Button, light_color)
-        dark_palette.setColor(QPalette.ButtonText, text_color)
-        dark_palette.setColor(QPalette.BrightText, QColor(239, 68, 68))
-        dark_palette.setColor(QPalette.Link, accent_color)
-        dark_palette.setColor(QPalette.Highlight, accent_color)
-        dark_palette.setColor(QPalette.HighlightedText, QColor(255, 255, 255))
-
-        QApplication.setPalette(dark_palette)
-
-        # Глобальный QSS стиль
-        self.setStyleSheet("""
-            QMainWindow {
-                background: #1a1a2e;
-            }
-            QToolBar {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #16213e, stop:1 #1a1a2e);
+        self.setStyleSheet(f"""
+            QMainWindow {{ background: {bg.name()}; }}
+            QToolBar {{
+                background: {surface.name()};
                 border: none;
-                border-bottom: 1px solid #2d2d4a;
-                padding: 5px;
-                spacing: 5px;
-            }
-            QPushButton {
-                background: rgba(139, 92, 246, 0.15);
-                border: 1px solid rgba(139, 92, 246, 0.3);
+                border-bottom: 1px solid {border.name()};
+                padding: 8px 12px;
+                spacing: 6px;
+            }}
+            QPushButton {{
+                background: transparent;
+                border: 1px solid transparent;
+                color: {muted.name()};
+                padding: 6px 10px;
+                border-radius: 6px;
+                font-size: 14px;
+            }}
+            QPushButton:hover {{
+                background: #1a1a1d;
+                color: {text.name()};
+            }}
+            QLineEdit {{
+                background: #0a0a0c;
+                border: 1px solid {border.name()};
                 border-radius: 8px;
-                color: #e2e8f0;
+                color: {text.name()};
                 padding: 8px 14px;
                 font-size: 13px;
-                font-weight: 500;
-            }
-            QPushButton:hover {
-                background: rgba(139, 92, 246, 0.3);
-                border-color: rgba(139, 92, 246, 0.6);
-            }
-            QPushButton:pressed {
-                background: rgba(139, 92, 246, 0.5);
-            }
-            QLineEdit {
-                background: #0f0c29;
-                border: 2px solid #2d2d4a;
-                border-radius: 10px;
-                color: #e2e8f0;
+            }}
+            QLineEdit:focus {{
+                border-color: {accent.name()};
+            }}
+            QTabWidget::pane {{ border: none; background: {bg.name()}; }}
+            QTabBar::tab {{
+                background: {surface.name()};
+                color: {muted.name()};
                 padding: 8px 16px;
-                font-size: 14px;
-                selection-background-color: rgba(139, 92, 246, 0.4);
-            }
-            QLineEdit:focus {
-                border-color: #8b5cf6;
-                box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.2);
-            }
-            QTabWidget::pane {
+                margin-right: 1px;
                 border: none;
-                background: #1a1a2e;
-            }
-            QTabBar::tab {
-                background: #16213e;
-                color: #94a3b8;
-                padding: 10px 20px;
-                margin-right: 2px;
-                border-top-left-radius: 8px;
-                border-top-right-radius: 8px;
-                min-width: 150px;
-                max-width: 250px;
-            }
-            QTabBar::tab:selected {
-                background: #1a1a2e;
-                color: #e2e8f0;
-                border-bottom: 2px solid #8b5cf6;
-            }
-            QTabBar::tab:hover {
-                background: #1e2a4a;
-                color: #e2e8f0;
-            }
-            QTabBar::close-button {
-                subcontrol-position: right;
-                padding: 3px;
-            }
-            QTabBar::close-button:hover {
-                background: rgba(239, 68, 68, 0.3);
-                border-radius: 4px;
-            }
-            QStatusBar {
-                background: #0f0c29;
-                color: #94a3b8;
-                border-top: 1px solid #2d2d4a;
-            }
-            QMenu {
-                background: #1e1e3a;
-                border: 1px solid #2d2d4a;
-                border-radius: 8px;
-                padding: 5px;
-            }
-            QMenu::item {
-                color: #e2e8f0;
-                padding: 8px 30px;
-                border-radius: 4px;
-            }
-            QMenu::item:selected {
-                background: rgba(139, 92, 246, 0.3);
-            }
-            QComboBox {
-                background: #16213e;
-                border: 1px solid #2d2d4a;
-                border-radius: 6px;
-                color: #e2e8f0;
-                padding: 5px 10px;
-            }
-            QComboBox::drop-down {
-                border: none;
-            }
-            QComboBox QAbstractItemView {
-                background: #1e1e3a;
-                border: 1px solid #2d2d4a;
-                color: #e2e8f0;
-                selection-background-color: rgba(139, 92, 246, 0.3);
-            }
-            QScrollBar:vertical {
-                background: #1a1a2e;
-                width: 10px;
-                border-radius: 5px;
-            }
-            QScrollBar::handle:vertical {
-                background: #3d3d5c;
-                border-radius: 5px;
-                min-height: 30px;
-            }
-            QScrollBar::handle:vertical:hover {
-                background: #8b5cf6;
-            }
+                min-width: 120px;
+                max-width: 200px;
+                font-size: 12px;
+            }}
+            QTabBar::tab:selected {{
+                background: {bg.name()};
+                color: {text.name()};
+                border-top: 2px solid {accent.name()};
+            }}
+            QTabBar::tab:hover {{ color: {text.name()}; }}
+            QStatusBar {{
+                background: {surface.name()};
+                color: {muted.name()};
+                border-top: 1px solid {border.name()};
+                font-size: 11px;
+            }}
         """)
 
-    def _create_ui(self):
-        """Создание интерфейса"""
-        # Панель вкладок
+    def _build_ui(self):
         self.tabs = QTabWidget()
         self.tabs.setDocumentMode(True)
         self.tabs.setTabsClosable(True)
-        self.tabs.tabCloseRequested.connect(self.close_tab)
+        self.tabs.tabCloseRequested.connect(self._close_tab)
         self.tabs.currentChanged.connect(self._on_tab_changed)
-
         self.setCentralWidget(self.tabs)
 
-        # Панель инструментов
-        self._create_toolbar()
+        tb = QToolBar(); tb.setMovable(False)
+        self.addToolBar(tb)
 
-        # Строка состояния
+        self.back_btn = QPushButton("←")
+        self.fwd_btn = QPushButton("→")
+        self.reload_btn = QPushButton("⟳")
+        self.home_btn = QPushButton("⌂")
+        self.settings_btn = QPushButton("⚙")
+
+        self.back_btn.clicked.connect(lambda: self._cur().back())
+        self.fwd_btn.clicked.connect(lambda: self._cur().forward())
+        self.reload_btn.clicked.connect(lambda: self._cur().reload())
+        self.home_btn.clicked.connect(self._go_home)
+        self.settings_btn.clicked.connect(self._open_settings)
+
+        self.url_bar = QLineEdit()
+        self.url_bar.setPlaceholderText("Поиск или URL")
+        self.url_bar.returnPressed.connect(self._navigate)
+
+        tb.addWidget(self.back_btn)
+        tb.addWidget(self.fwd_btn)
+        tb.addWidget(self.reload_btn)
+        tb.addWidget(self.home_btn)
+        tb.addWidget(self.url_bar)
+        tb.addWidget(self.settings_btn)
+
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
-        self.status_label = QLabel("Готово")
-        self.status_bar.addWidget(self.status_label)
+        self.status_bar.addWidget(QLabel("Готово"))
 
-        # Горячие клавиши
         QShortcut(QKeySequence("Ctrl+T"), self, self.new_tab)
-        QShortcut(QKeySequence("Ctrl+W"), self, self._close_current_tab)
-        QShortcut(QKeySequence("Ctrl+L"), self, self.url_bar.setFocus)
-        QShortcut(QKeySequence("Ctrl+R"), self, self._reload_current)
-        QShortcut(QKeySequence("Ctrl+D"), self, self._add_bookmark)
-        QShortcut(QKeySequence("Ctrl+Tab"), self, self._next_tab)
-        QShortcut(QKeySequence("Ctrl+Shift+Tab"), self, self._prev_tab)
+        QShortcut(QKeySequence("Ctrl+W"), self, self._close_current)
+        QShortcut(QKeySequence("Ctrl+L"), self, lambda: self.url_bar.setFocus())
+        QShortcut(QKeySequence("Ctrl+,"), self, self._open_settings)
 
-    def _create_toolbar(self):
-        """Создание панели инструментов"""
-        toolbar = QToolBar()
-        toolbar.setMovable(False)
-        toolbar.setIconSize(QSize(20, 20))
-        self.addToolBar(toolbar)
-
-        # Кнопки навигации
-        self.back_btn = QPushButton("◀")
-        self.back_btn.setToolTip("Назад (Alt+Left)")
-        self.forward_btn = QPushButton("▶")
-        self.forward_btn.setToolTip("Вперёд (Alt+Right)")
-        self.reload_btn = QPushButton("⟳")
-        self.reload_btn.setToolTip("Обновить (Ctrl+R)")
-        self.home_btn = QPushButton("🏠")
-        self.home_btn.setToolTip("Домашняя страница")
-
-        # Подключение кнопок
-        self.back_btn.clicked.connect(self._go_back)
-        self.forward_btn.clicked.connect(self._go_forward)
-        self.reload_btn.clicked.connect(self._reload_current)
-        self.home_btn.clicked.connect(self._go_home)
-
-        # Адресная строка
-        self.url_bar = QLineEdit()
-        self.url_bar.setPlaceholderText("🔍 Введите адрес или поисковый запрос...")
-        self.url_bar.returnPressed.connect(self.navigate)
-
-        # Кнопка закладок
-        self.bookmark_btn = QPushButton("⭐")
-        self.bookmark_btn.setToolTip("Добавить в закладки (Ctrl+D)")
-        self.bookmark_btn.clicked.connect(self._add_bookmark)
-
-        # Кнопка расширений
-        self.ext_btn = QPushButton("🧩")
-        self.ext_btn.setToolTip("Управление расширениями")
-        self.ext_btn.clicked.connect(self._show_extensions_menu)
-
-        # Новая вкладка
-        self.new_tab_btn = QPushButton("+")
-        self.new_tab_btn.setToolTip("Новая вкладка (Ctrl+T)")
-        self.new_tab_btn.clicked.connect(self.new_tab)
-
-        # Добавляем на панель
-        toolbar.addWidget(self.back_btn)
-        toolbar.addWidget(self.forward_btn)
-        toolbar.addWidget(self.reload_btn)
-        toolbar.addWidget(self.home_btn)
-        toolbar.addSeparator()
-        toolbar.addWidget(self.url_bar)
-        toolbar.addSeparator()
-        toolbar.addWidget(self.bookmark_btn)
-        toolbar.addWidget(self.ext_btn)
-        toolbar.addWidget(self.new_tab_btn)
-
-    # ============================================================
-    # УПРАВЛЕНИЕ ВКЛАДКАМИ
-    # ============================================================
+    def _cur(self):
+        return self.tabs.currentWidget()
 
     def new_tab(self, url=""):
-        """Создание новой вкладки"""
-        if not url:
-            # Показываем стартовую страницу
-            if self.ext_manager.is_enabled("speed_dial"):
-                html = self.speed_dial_ext.get_speed_dial_html()
-                new_browser = BrowserTab()
-                new_browser.setHtml(html)
-            else:
-                new_browser = BrowserTab()
-                new_browser.setUrl(QUrl("https://www.google.com"))
-        else:
-            new_browser = BrowserTab()
-            new_browser.setUrl(QUrl(url))
+        b = QWebEngineView()
+        b.setUrl(QUrl(url or "https://google.com"))
+        i = self.tabs.addTab(b, "Новая вкладка")
+        self.tabs.setCurrentIndex(i)
+        b.titleChanged.connect(lambda t, br=b: self._set_title(br, t))
+        b.urlChanged.connect(lambda q, br=b: self._on_url(br, q))
 
-        idx = self.tabs.addTab(new_browser, "Новая вкладка")
-        self.tabs.setCurrentIndex(idx)
-        self.url_bar.setFocus()
+    def _set_title(self, b, t):
+        i = self.tabs.indexOf(b)
+        if i >= 0:
+            self.tabs.setTabText(i, (t[:25]+"…") if len(t)>25 else t)
 
-        # Подключаем сигналы
-        new_browser.titleChanged.connect(
-            lambda title, browser=new_browser: self._update_tab_title(browser, title)
-        )
-        new_browser.urlChanged.connect(
-            lambda q, browser=new_browser: self._on_url_changed(browser, q)
-        )
-        new_browser.loadStarted.connect(
-            lambda: self.status_label.setText("Загрузка...")
-        )
-        new_browser.loadFinished.connect(
-            lambda ok: self._on_load_finished(ok)
-        )
-
-    def close_tab(self, index):
-        """Закрытие вкладки"""
-        if self.tabs.count() > 1:
-            self.tabs.removeTab(index)
-        else:
-            # Если последняя вкладка — открываем новую
-            self.new_tab()
-
-    def _close_current_tab(self):
-        """Закрытие текущей вкладки"""
-        self.close_tab(self.tabs.currentIndex())
-
-    def _on_tab_changed(self, index):
-        """При переключении вкладки обновляем адресную строку"""
-        if index >= 0:
-            browser = self.tabs.widget(index)
-            if browser:
-                self.url_bar.setText(browser.url().toString())
-
-    def _update_tab_title(self, browser, title):
-        """Обновление заголовка вкладки"""
-        index = self.tabs.indexOf(browser)
-        if index >= 0:
-            # Обрезаем длинные заголовки
-            display_title = title[:30] + "..." if len(title) > 30 else title
-            self.tabs.setTabText(index, display_title)
-
-    def _on_url_changed(self, browser, q):
-        """Обработка изменения URL"""
-        if browser == self.tabs.currentWidget():
+    def _on_url(self, b, q):
+        if b == self._cur():
             self.url_bar.setText(q.toString())
 
-        # Уведомляем расширения
-        for ext in self.ext_manager.get_enabled_extensions():
-            ext.on_url_changed(q.toString())
+    def _on_tab_changed(self, i):
+        if i >= 0 and self.tabs.widget(i):
+            self.url_bar.setText(self.tabs.widget(i).url().toString())
 
-    def _on_load_finished(self, ok):
-        """Обработка завершения загрузки"""
-        if ok:
-            self.status_label.setText("Готово ✓")
-            # Уведомляем расширения о загрузке
-            current = self.tabs.currentWidget()
-            if current:
-                for ext in self.ext_manager.get_enabled_extensions():
-                    ext.on_page_loaded(current.page())
-        else:
-            self.status_label.setText("Ошибка загрузки ✗")
+    def _close_tab(self, i):
+        if self.tabs.count() > 1: self.tabs.removeTab(i)
+        else: self.new_tab()
 
-    # ============================================================
-    # НАВИГАЦИЯ
-    # ============================================================
+    def _close_current(self):
+        self._close_tab(self.tabs.currentIndex())
 
-    def navigate(self):
-        """Переход по адресу"""
-        url = self.url_bar.text().strip()
-
-        # Если это поисковый запрос (не URL)
-        if "." not in url and ":" not in url:
-            url = f"https://www.google.com/search?q={url}"
-        elif not url.startswith("http"):
-            url = "https://" + url
-
-        current = self.tabs.currentWidget()
-        if current:
-            current.setUrl(QUrl(url))
-
-    def _go_back(self):
-        current = self.tabs.currentWidget()
-        if current:
-            current.back()
-
-    def _go_forward(self):
-        current = self.tabs.currentWidget()
-        if current:
-            current.forward()
-
-    def _reload_current(self):
-        current = self.tabs.currentWidget()
-        if current:
-            current.reload()
+    def _navigate(self):
+        u = self.url_bar.text().strip()
+        if "." not in u and ":" not in u:
+            u = f"https://google.com/search?q={u}"
+        elif not u.startswith("http"):
+            u = "https://" + u
+        if self._cur(): self._cur().setUrl(QUrl(u))
 
     def _go_home(self):
-        """Домашняя страница"""
-        if self.ext_manager.is_enabled("speed_dial"):
-            current = self.tabs.currentWidget()
-            if current:
-                current.setHtml(self.speed_dial_ext.get_speed_dial_html())
-        else:
-            current = self.tabs.currentWidget()
-            if current:
-                current.setUrl(QUrl("https://www.google.com"))
+        if self._cur(): self._cur().setUrl(QUrl("https://google.com"))
 
-    def _next_tab(self):
-        """Следующая вкладка"""
-        current = self.tabs.currentIndex()
-        if current < self.tabs.count() - 1:
-            self.tabs.setCurrentIndex(current + 1)
-        else:
-            self.tabs.setCurrentIndex(0)
+    def _open_settings(self):
+        self.sw = SettingsWindow(self.settings, self.ext_manager, self)
+        self.sw.show()
 
-    def _prev_tab(self):
-        """Предыдущая вкладка"""
-        current = self.tabs.currentIndex()
-        if current > 0:
-            self.tabs.setCurrentIndex(current - 1)
-        else:
-            self.tabs.setCurrentIndex(self.tabs.count() - 1)
-
-    # ============================================================
-    # ЗАКЛАДКИ
-    # ============================================================
-
-    def _add_bookmark(self):
-        """Добавление текущей страницы в закладки"""
-        current = self.tabs.currentWidget()
-        if current:
-            title = current.title() or "Без названия"
-            url = current.url().toString()
-            self.bookmark_ext.add_bookmark(title, url)
-            self.status_label.setText(f"⭐ Добавлено в закладки: {title}")
-
-    # ============================================================
-    # РАСШИРЕНИЯ
-    # ============================================================
-
-    def _show_extensions_menu(self):
-        """Показать меню управления расширениями"""
-        menu = QMenu(self)
-        menu.setStyleSheet("""
-            QMenu {
-                background: #1e1e3a;
-                border: 1px solid #2d2d4a;
-                border-radius: 8px;
-                padding: 8px;
-                min-width: 250px;
-            }
-            QMenu::item {
-                color: #e2e8f0;
-                padding: 10px 20px;
-                border-radius: 4px;
-                font-size: 13px;
-            }
-            QMenu::item:selected {
-                background: rgba(139, 92, 246, 0.3);
-            }
-        """)
-
-        for name, ext in self.ext_manager.extensions.items():
-            status = "✓" if self.ext_manager.is_enabled(name) else "○"
-            action = QAction(f"{ext.icon} {ext.name}  [{status}]", self)
-            action.setToolTip(ext.description)
-            action.triggered.connect(
-                lambda checked, n=name: self._toggle_extension(n)
-            )
-            menu.addAction(action)
-
-        menu.addSeparator()
-        info_action = QAction("ℹ️ О расширениях", self)
-        info_action.triggered.connect(self._show_extensions_info)
-        menu.addAction(info_action)
-
-        self.ext_btn.setMenu(menu)
-        menu.popup(self.ext_btn.mapToGlobal(
-            self.ext_btn.rect().bottomLeft()
-        ))
-
-    def _toggle_extension(self, name):
-        """Переключение расширения"""
-        self.ext_manager.toggle_extension(name)
-        status = "включено" if self.ext_manager.is_enabled(name) else "выключено"
-        self.status_label.setText(
-            f"🧩 {self.ext_manager.extensions[name].name} — {status}"
-        )
-
-    def _show_extensions_info(self):
-        """Информация о расширениях"""
-        msg = QMessageBox(self)
-        msg.setWindowTitle("Расширения")
-        msg.setText("🧩 Система расширений")
-        info = "\\n".join([
-            f"{ext.icon} {ext.name}: {ext.description}"
-            for ext in self.ext_manager.extensions.values()
-        ])
-        msg.setInformativeText(info)
-        msg.setStyleSheet("""
-            QMessageBox {
-                background: #1e1e3a;
-            }
-            QMessageBox QLabel {
-                color: #e2e8f0;
-                font-size: 13px;
-            }
-            QPushButton {
-                background: rgba(139, 92, 246, 0.3);
-                border: 1px solid #8b5cf6;
-                color: white;
-                padding: 8px 20px;
-                border-radius: 6px;
-            }
-        """)
-        msg.exec_()
-
-
-# ============================================================
-# ЗАПУСК ПРИЛОЖЕНИЯ
-# ============================================================
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
-    app.setApplicationName("Мой Личный Браузер")
-
-    # Установка шрифта
-    font = QFont("Segoe UI", 10)
-    app.setFont(font)
-
-    window = MyPersonalBrowser()
-    window.show()
+    app.setFont(QFont("Inter", 10))
+    w = MyPersonalBrowser()
+    w.show()
     sys.exit(app.exec_())
 `;
 
-const requirementsCode = `# requirements.txt
-PyQt5>=5.15.0
+const requirementsCode = `PyQt5>=5.15.0
 PyQtWebEngine>=5.15.0
 `;
 
-const readmeCode = `# 🚀 Мой Личный Браузер
-
-Персональный браузер на PyQt5 с вкладками, тёмной темой и системой расширений.
-
-## Возможности
-
-### 📑 Вкладки
-- Создание/закрытие вкладок
-- Переключение между вкладками (Ctrl+Tab)
-- Каждая вкладка работает независимо
-
-### 🌙 Тёмная тема
-- Полностью кастомная тёмная тема
-- Градиентные фоны и анимации
-- Приятные для глаз цвета
-
-### 🧩 Расширения
-- **Тёмный режим** — принудительная тёмная тема на сайтах
-- **Блокировщик рекламы** — убирает баннеры и попапы
-- **Режим чтения** — только текст, ничего лишнего
-- **Закладки** — сохранение любимых сайтов
-- **Быстрый набор** — красивая стартовая страница
-
-### ⌨️ Горячие клавиши
-| Клавиша | Действие |
-|---------|----------|
-| Ctrl+T | Новая вкладка |
-| Ctrl+W | Закрыть вкладку |
-| Ctrl+L | Фокус на адресную строку |
-| Ctrl+R | Обновить страницу |
-| Ctrl+D | Добавить в закладки |
-| Ctrl+Tab | Следующая вкладка |
-| Ctrl+Shift+Tab | Предыдущая вкладка |
-
-## Установка
-
-\`\`\`bash
-pip install -r requirements.txt
-\`\`\`
-
-## Запуск
-
-\`\`\`bash
-python browser.py
-\`\`\`
-
-## Создание своих расширений
-
-\`\`\`python
-class MyExtension(Extension):
-    def __init__(self):
-        super().__init__(
-            "Моё расширение",
-            "Описание того, что оно делает",
-            "🎯"
-        )
-
-    def on_page_loaded(self, page):
-        # Код выполняется после загрузки каждой страницы
-        page.runJavaScript("alert('Привет!')")
-\`\`\`
-`;
-
-type Tab = {
-  id: string;
-  label: string;
-  icon: string;
-  code: string;
-  language: string;
-};
-
-const tabs: Tab[] = [
-  { id: 'main', label: 'browser.py', icon: '🐍', code: mainCode, language: 'python' },
-  { id: 'req', label: 'requirements.txt', icon: '📦', code: requirementsCode, language: 'text' },
-  { id: 'readme', label: 'README.md', icon: '📖', code: readmeCode, language: 'markdown' },
-];
-
-const features = [
-  { icon: '📑', title: 'Вкладки', desc: 'Полноценная система вкладок с возможностью закрытия, переключения и создания новых' },
-  { icon: '🌙', title: 'Тёмная тема', desc: 'Красивая тёмная тема с градиентами, фиолетовыми акцентами и плавными переходами' },
-  { icon: '🧩', title: 'Расширения', desc: 'Модульная система расширений: блокировщик рекламы, режим чтения, закладки и другие' },
-  { icon: '⌨️', title: 'Горячие клавиши', desc: 'Ctrl+T, Ctrl+W, Ctrl+L, Ctrl+R, Ctrl+D и другие сочетания для быстрого управления' },
-  { icon: '🏠', title: 'Стартовая страница', desc: 'Красивый Speed Dial с популярными сайтами и градиентным фоном' },
-  { icon: '⭐', title: 'Закладки', desc: 'Сохранение и управление закладками с персистентным хранением через QSettings' },
-];
+// ============ UI ============
 
 function App() {
-  const [activeTab, setActiveTab] = useState('main');
+  const [section, setSection] = useState<Section>('preview');
   const [copied, setCopied] = useState(false);
+  const [extEnabled, setExtEnabled] = useState<Record<string, boolean>>({
+    'dark-mode': true,
+    'ad-blocker': true,
+    'reader': false,
+    'bookmarks': true,
+    'speed-dial': true,
+  });
 
-  const currentTab = tabs.find(t => t.id === activeTab)!;
+  const extensions = [
+    { id: 'dark-mode', name: 'Тёмный режим', ver: '1.2.0', desc: 'Принудительная тёмная тема на всех сайтах', icon: '🌙', author: 'Browser Team' },
+    { id: 'ad-blocker', name: 'Блокировщик рекламы', ver: '2.0.1', desc: 'Удаляет баннеры, попапы и трекеры', icon: '🛡️', author: 'Browser Team' },
+    { id: 'reader', name: 'Режим чтения', ver: '1.0.0', desc: 'Убирает всё лишнее, оставляя только текст', icon: '📖', author: 'Browser Team' },
+    { id: 'bookmarks', name: 'Закладки', ver: '1.1.0', desc: 'Управление закладками с синхронизацией', icon: '⭐', author: 'Browser Team' },
+    { id: 'speed-dial', name: 'Быстрый набор', ver: '1.0.0', desc: 'Стартовая страница с избранными сайтами', icon: '🏠', author: 'Browser Team' },
+  ];
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(currentTab.code);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const toggleExt = (id: string) => {
+    setExtEnabled(prev => ({ ...prev, [id]: !prev[id] }));
   };
 
+  const copyCode = () => {
+    navigator.clipboard.writeText(mainCode);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1800);
+  };
+
+  const sections: { id: Section; label: string; icon: string }[] = [
+    { id: 'preview', label: 'Превью', icon: '◉' },
+    { id: 'extensions', label: 'Расширения', icon: '⧉' },
+    { id: 'settings', label: 'Настройки', icon: '⚙' },
+    { id: 'code', label: 'Код', icon: '⟨⟩' },
+    { id: 'shortcuts', label: 'Клавиши', icon: '⌨' },
+  ];
+
   return (
-    <div className="min-h-screen bg-[#0a0a1a] text-gray-100">
-      {/* Header */}
-      <header className="border-b border-purple-900/30 bg-gradient-to-r from-[#0f0c29] via-[#1a1a2e] to-[#16213e]">
-        <div className="max-w-7xl mx-auto px-6 py-8">
-          <div className="flex items-center gap-4">
-            <div className="text-5xl">🚀</div>
-            <div>
-              <h1 className="text-3xl font-bold bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">
-                Мой Личный Браузер
-              </h1>
-              <p className="text-gray-400 mt-1">
-                PyQt5 • Вкладки • Тёмная тема • Расширения
-              </p>
-            </div>
+    <div className="min-h-screen bg-[#0a0a0c] text-[#fafafa] font-sans antialiased">
+      {/* Top bar — browser-like tabs */}
+      <div className="sticky top-0 z-50 bg-[#111113] border-b border-[#222225]">
+        <div className="flex items-center">
+          {/* Traffic lights */}
+          <div className="flex items-center gap-2 px-4 py-3">
+            <div className="w-3 h-3 rounded-full bg-[#ff5f57]" />
+            <div className="w-3 h-3 rounded-full bg-[#febc2e]" />
+            <div className="w-3 h-3 rounded-full bg-[#28c840]" />
           </div>
-        </div>
-      </header>
 
-      {/* Features */}
-      <section className="max-w-7xl mx-auto px-6 py-10">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {features.map((f, i) => (
-            <div
-              key={i}
-              className="bg-[#16213e]/60 border border-purple-900/20 rounded-xl p-5 hover:border-purple-500/40 transition-all duration-300 hover:transform hover:-translate-y-1"
-            >
-              <div className="text-3xl mb-3">{f.icon}</div>
-              <h3 className="text-lg font-semibold text-purple-200 mb-1">{f.title}</h3>
-              <p className="text-sm text-gray-400">{f.desc}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* Code Section */}
-      <section className="max-w-7xl mx-auto px-6 pb-12">
-        <div className="bg-[#1e1e3a] rounded-2xl border border-purple-900/30 overflow-hidden shadow-2xl shadow-purple-900/10">
-          {/* Tab bar */}
-          <div className="flex items-center bg-[#0f0c29] border-b border-purple-900/30">
-            {tabs.map(tab => (
+          {/* Tabs */}
+          <div className="flex items-end pt-2">
+            {sections.map(s => (
               <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`px-5 py-3 text-sm font-medium transition-all duration-200 border-b-2 ${
-                  activeTab === tab.id
-                    ? 'border-purple-500 text-purple-200 bg-[#1e1e3a]/50'
-                    : 'border-transparent text-gray-500 hover:text-gray-300 hover:bg-[#1e1e3a]/30'
+                key={s.id}
+                onClick={() => setSection(s.id)}
+                className={`px-5 py-2 text-[12px] tracking-wide rounded-t-lg transition-colors border-r border-[#222225] ${
+                  section === s.id
+                    ? 'bg-[#0a0a0c] text-[#fafafa] border-t-2 border-t-[#10b981]'
+                    : 'bg-[#111113] text-[#71717a] hover:text-[#a1a1aa]'
                 }`}
               >
-                <span className="mr-2">{tab.icon}</span>
-                {tab.label}
+                <span className="mr-2 opacity-70">{s.icon}</span>
+                {s.label}
               </button>
             ))}
-            <div className="ml-auto pr-4">
-              <button
-                onClick={handleCopy}
-                className="px-4 py-1.5 text-xs font-medium rounded-lg bg-purple-600/20 border border-purple-500/30 text-purple-300 hover:bg-purple-600/40 transition-all duration-200"
-              >
-                {copied ? '✓ Скопировано!' : '📋 Копировать'}
-              </button>
-            </div>
           </div>
+          <div className="flex-1" />
+        </div>
+      </div>
 
-          {/* Code */}
-          <div className="overflow-auto max-h-[70vh]">
-            <SyntaxHighlighter
-              language={currentTab.language}
-              style={vscDarkPlus}
-              customStyle={{
-                margin: 0,
-                padding: '20px',
-                background: '#1e1e3a',
-                fontSize: '13px',
-                lineHeight: '1.6',
-              }}
-              showLineNumbers
-              wrapLines
-            >
-              {currentTab.code}
-            </SyntaxHighlighter>
+      {/* Content */}
+      <main className="max-w-6xl mx-auto px-6 py-10">
+        {section === 'preview' && <PreviewSection />}
+        {section === 'extensions' && (
+          <ExtensionsSection
+            extensions={extensions}
+            enabled={extEnabled}
+            onToggle={toggleExt}
+          />
+        )}
+        {section === 'settings' && <SettingsSection />}
+        {section === 'code' && (
+          <CodeSection
+            code={mainCode}
+            reqCode={requirementsCode}
+            copied={copied}
+            onCopy={copyCode}
+          />
+        )}
+        {section === 'shortcuts' && <ShortcutsSection />}
+      </main>
+
+      <footer className="border-t border-[#1a1a1d] py-6 text-center text-[11px] text-[#52525b]">
+        <code className="font-mono">pip install PyQt5 PyQtWebEngine && python browser.py</code>
+      </footer>
+    </div>
+  );
+}
+
+// ============ PREVIEW ============
+
+function PreviewSection() {
+  return (
+    <div className="space-y-8">
+      <div>
+        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#10b981]/10 border border-[#10b981]/20 text-[#10b981] text-[11px] tracking-wider uppercase mb-4">
+          <span className="w-1.5 h-1.5 rounded-full bg-[#10b981] animate-pulse" />
+          PyQt5 · Desktop Browser
+        </div>
+        <h1 className="text-5xl font-semibold tracking-tight text-[#fafafa] mb-3">
+          Мой Личный Браузер
+        </h1>
+        <p className="text-[#a1a1aa] text-lg max-w-2xl leading-relaxed">
+          Минималистичный десктопный браузер с вкладками, тёмной темой и системой расширений.
+          Написан на Python + PyQt5.
+        </p>
+      </div>
+
+      {/* Browser mockup */}
+      <div className="rounded-xl overflow-hidden border border-[#222225] shadow-2xl shadow-black/40">
+        {/* Title bar */}
+        <div className="bg-[#111113] px-4 py-2.5 flex items-center gap-2 border-b border-[#222225]">
+          <div className="flex gap-1.5">
+            <div className="w-3 h-3 rounded-full bg-[#ff5f57]" />
+            <div className="w-3 h-3 rounded-full bg-[#febc2e]" />
+            <div className="w-3 h-3 rounded-full bg-[#28c840]" />
+          </div>
+          <div className="flex-1 text-center text-[11px] text-[#71717a]">Мой Личный Браузер</div>
+        </div>
+
+        {/* Tab bar */}
+        <div className="bg-[#111113] flex items-end px-2 pt-1">
+          <div className="bg-[#0a0a0c] text-[#fafafa] text-[12px] px-4 py-2 rounded-t-md flex items-center gap-2 border-t-2 border-t-[#10b981]">
+            <span className="text-[#10b981]">◉</span> Google
+            <span className="text-[#52525b] ml-2 hover:text-[#fafafa] cursor-pointer">×</span>
+          </div>
+          <div className="text-[#71717a] text-[12px] px-4 py-2 flex items-center gap-2">
+            <span>💻</span> GitHub
+            <span className="text-[#52525b] ml-2 hover:text-[#fafafa] cursor-pointer">×</span>
+          </div>
+          <button className="text-[#52525b] hover:text-[#a1a1aa] px-2 py-1 text-sm">+</button>
+        </div>
+
+        {/* Toolbar */}
+        <div className="bg-[#111113] px-3 py-2 flex items-center gap-1.5 border-b border-[#222225]">
+          {['←', '→', '⟳', '⌂'].map((b, i) => (
+            <button key={i} className="w-8 h-8 rounded-md text-[#a1a1aa] hover:bg-[#1a1a1d] hover:text-[#fafafa] text-sm">
+              {b}
+            </button>
+          ))}
+          <div className="flex-1 bg-[#0a0a0c] border border-[#222225] rounded-md px-3 py-1.5 text-[12px] text-[#a1a1aa] flex items-center gap-2">
+            <span className="text-[#10b981]">🔒</span>
+            https://www.google.com
+          </div>
+          <button className="w-8 h-8 rounded-md text-[#a1a1aa] hover:bg-[#1a1a1d] text-sm">⚙</button>
+        </div>
+
+        {/* Content */}
+        <div className="bg-[#0a0a0c] min-h-[420px] flex flex-col items-center justify-center p-10">
+          <div className="text-6xl mb-4">🔍</div>
+          <div className="text-[#fafafa] text-2xl font-medium mb-2">Google</div>
+          <div className="w-full max-w-md bg-[#111113] border border-[#222225] rounded-full px-5 py-3 text-[13px] text-[#71717a] text-center">
+            Поиск в Google или введите URL
+          </div>
+          <div className="flex gap-3 mt-6">
+            <div className="bg-[#111113] border border-[#222225] rounded-md px-4 py-2 text-[12px] text-[#a1a1aa]">Поиск в Google</div>
+            <div className="bg-[#111113] border border-[#222225] rounded-md px-4 py-2 text-[12px] text-[#a1a1aa]">Мне повезёт!</div>
           </div>
         </div>
-      </section>
 
-      {/* Browser Preview */}
-      <section className="max-w-7xl mx-auto px-6 pb-12">
-        <h2 className="text-2xl font-bold text-purple-200 mb-6 flex items-center gap-3">
-          <span>🖥️</span> Как это выглядит
-        </h2>
-        <div className="bg-[#1a1a2e] rounded-2xl border border-purple-900/30 overflow-hidden shadow-2xl">
-          {/* Fake browser chrome */}
-          <div className="bg-gradient-to-r from-[#16213e] to-[#1a1a2e] border-b border-[#2d2d4a] p-3">
-            {/* Tab bar */}
-            <div className="flex items-center gap-1 mb-3">
-              <div className="bg-[#1a1a2e] text-gray-200 text-xs px-4 py-2 rounded-t-lg border-b-2 border-purple-500 flex items-center gap-2">
-                <span>🔍</span> Google
-                <span className="text-gray-500 ml-2 hover:text-red-400 cursor-pointer">×</span>
+        {/* Status bar */}
+        <div className="bg-[#111113] border-t border-[#222225] px-4 py-1.5 text-[11px] text-[#52525b]">
+          Готово
+        </div>
+      </div>
+
+      {/* Feature grid */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {[
+          { icon: '◉', title: 'Вкладки', desc: 'Независимые вкладки с автовосстановлением' },
+          { icon: '⧉', title: 'Расширения', desc: 'Модульная система как в Chrome' },
+          { icon: '⚙', title: 'Настройки', desc: 'Полная кастомизация интерфейса' },
+          { icon: '◐', title: 'Тёмная тема', desc: 'Сдержанная палитра, мягкий контраст' },
+          { icon: '⌨', title: 'Горячие клавиши', desc: 'Все основные сочетания из коробки' },
+          { icon: '🔒', title: 'Приватность', desc: 'Блокировщик рекламы и Do Not Track' },
+        ].map((f, i) => (
+          <div key={i} className="bg-[#111113] border border-[#222225] rounded-lg p-5 hover:border-[#10b981]/30 transition-colors">
+            <div className="text-[#10b981] text-lg mb-3 font-mono">{f.icon}</div>
+            <div className="text-[#fafafa] text-sm font-medium mb-1">{f.title}</div>
+            <div className="text-[#71717a] text-[13px] leading-relaxed">{f.desc}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ============ EXTENSIONS (chrome://extensions style) ============
+
+function ExtensionsSection({ extensions, enabled, onToggle }: {
+  extensions: { id: string; name: string; ver: string; desc: string; icon: string; author: string }[];
+  enabled: Record<string, boolean>;
+  onToggle: (id: string) => void;
+}) {
+  const [search, setSearch] = useState('');
+  const filtered = extensions.filter(e =>
+    e.name.toLowerCase().includes(search.toLowerCase()) ||
+    e.desc.toLowerCase().includes(search.toLowerCase())
+  );
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <div className="text-[11px] text-[#71717a] tracking-wider uppercase mb-2">chrome://extensions</div>
+        <h2 className="text-3xl font-semibold tracking-tight">Расширения</h2>
+        <p className="text-[#a1a1aa] text-sm mt-1">Управление установленными расширениями браузера</p>
+      </div>
+
+      {/* Top controls */}
+      <div className="flex items-center gap-3">
+        <div className="flex-1 relative">
+          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#52525b] text-sm">⌕</span>
+          <input
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Поиск расширений"
+            className="w-full bg-[#111113] border border-[#222225] rounded-md pl-9 pr-4 py-2 text-[13px] text-[#fafafa] placeholder:text-[#52525b] focus:outline-none focus:border-[#10b981]/50"
+          />
+        </div>
+        <button className="bg-[#111113] border border-[#222225] rounded-md px-4 py-2 text-[13px] text-[#fafafa] hover:border-[#10b981]/40 transition-colors">
+          + Загрузить распакованное
+        </button>
+      </div>
+
+      {/* Dev mode toggle */}
+      <div className="flex items-center justify-between bg-[#111113] border border-[#222225] rounded-lg p-4">
+        <div>
+          <div className="text-[13px] text-[#fafafa] font-medium">Режим разработчика</div>
+          <div className="text-[12px] text-[#71717a] mt-0.5">Загружать расширения из исходного кода</div>
+        </div>
+        <Toggle checked={false} onChange={() => {}} />
+      </div>
+
+      {/* Extensions list */}
+      <div className="space-y-3">
+        {filtered.map(ext => (
+          <div key={ext.id} className="bg-[#111113] border border-[#222225] rounded-lg p-5">
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-lg bg-[#0a0a0c] border border-[#222225] flex items-center justify-center text-2xl flex-shrink-0">
+                {ext.icon}
               </div>
-              <div className="bg-[#16213e] text-gray-500 text-xs px-4 py-2 rounded-t-lg flex items-center gap-2">
-                <span>💻</span> GitHub
-                <span className="text-gray-600 ml-2 hover:text-red-400 cursor-pointer">×</span>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-[14px] font-medium text-[#fafafa]">{ext.name}</span>
+                  <span className="text-[11px] text-[#52525b] font-mono">v{ext.ver}</span>
+                </div>
+                <div className="text-[12px] text-[#a1a1aa] leading-relaxed mb-2">{ext.desc}</div>
+                <div className="flex items-center gap-4 text-[11px] text-[#52525b]">
+                  <span>ID: {ext.id}</span>
+                  <span>·</span>
+                  <span>{ext.author}</span>
+                </div>
               </div>
-              <button className="text-gray-500 hover:text-gray-300 text-lg px-2">+</button>
-            </div>
-            {/* Toolbar */}
-            <div className="flex items-center gap-2">
-              <button className="bg-purple-500/15 border border-purple-500/30 rounded-lg px-3 py-1.5 text-sm text-gray-300">◀</button>
-              <button className="bg-purple-500/15 border border-purple-500/30 rounded-lg px-3 py-1.5 text-sm text-gray-300">▶</button>
-              <button className="bg-purple-500/15 border border-purple-500/30 rounded-lg px-3 py-1.5 text-sm text-gray-300">⟳</button>
-              <button className="bg-purple-500/15 border border-purple-500/30 rounded-lg px-3 py-1.5 text-sm text-gray-300">🏠</button>
-              <div className="flex-1 bg-[#0f0c29] border-2 border-[#2d2d4a] rounded-xl px-4 py-2 text-sm text-gray-300">
-                🔍 https://www.google.com
+              <div className="flex items-center gap-3 flex-shrink-0">
+                <button className="text-[#52525b] hover:text-[#fafafa] text-sm px-2 py-1 rounded hover:bg-[#1a1a1d]">⋮</button>
+                <Toggle checked={enabled[ext.id]} onChange={() => onToggle(ext.id)} />
               </div>
-              <button className="bg-purple-500/15 border border-purple-500/30 rounded-lg px-3 py-1.5 text-sm text-gray-300">⭐</button>
-              <button className="bg-purple-500/15 border border-purple-500/30 rounded-lg px-3 py-1.5 text-sm text-gray-300">🧩</button>
             </div>
           </div>
-          {/* Content area */}
-          <div className="bg-gradient-to-br from-[#0f0c29] via-[#302b63] to-[#24243e] p-12 min-h-[300px] flex flex-col items-center justify-center">
-            <h3 className="text-3xl font-bold text-white mb-2">🚀 Мой Браузер</h3>
-            <p className="text-indigo-300 mb-8">Быстрый набор</p>
-            <div className="grid grid-cols-3 gap-4 max-w-md">
-              {[
-                { emoji: '🔍', name: 'Google' },
-                { emoji: '▶️', name: 'YouTube' },
-                { emoji: '💻', name: 'GitHub' },
-                { emoji: '📚', name: 'Wikipedia' },
-                { emoji: '🤖', name: 'Reddit' },
-                { emoji: '📋', name: 'Stack Overflow' },
-              ].map((site, i) => (
-                <div
-                  key={i}
-                  className="bg-white/8 border border-white/10 rounded-2xl p-5 flex flex-col items-center gap-2 hover:bg-white/15 transition-all duration-300 cursor-pointer hover:-translate-y-1"
-                >
-                  <span className="text-3xl">{site.emoji}</span>
-                  <span className="text-xs text-gray-300">{site.name}</span>
+        ))}
+      </div>
+
+      {filtered.length === 0 && (
+        <div className="text-center py-12 text-[#52525b] text-sm">
+          Расширения не найдены
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Toggle({ checked, onChange }: { checked: boolean; onChange: () => void }) {
+  return (
+    <button
+      onClick={onChange}
+      className={`relative w-10 h-5 rounded-full transition-colors ${
+        checked ? 'bg-[#10b981]' : 'bg-[#27272a]'
+      }`}
+    >
+      <span
+        className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-transform ${
+          checked ? 'translate-x-5' : 'translate-x-0.5'
+        }`}
+      />
+    </button>
+  );
+}
+
+// ============ SETTINGS ============
+
+function SettingsSection() {
+  const [settingsPage, setSettingsPage] = useState('appearance');
+
+  const pages = [
+    { id: 'appearance', label: 'Внешний вид', icon: '◐' },
+    { id: 'search', label: 'Поиск', icon: '⌕' },
+    { id: 'startup', label: 'Запуск', icon: '▶' },
+    { id: 'privacy', label: 'Приватность', icon: '🔒' },
+    { id: 'downloads', label: 'Загрузки', icon: '↓' },
+    { id: 'languages', label: 'Языки', icon: '🌐' },
+    { id: 'about', label: 'О браузере', icon: 'ⓘ' },
+  ];
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <div className="text-[11px] text-[#71717a] tracking-wider uppercase mb-2">chrome://settings</div>
+        <h2 className="text-3xl font-semibold tracking-tight">Настройки</h2>
+      </div>
+
+      <div className="flex gap-6">
+        {/* Sidebar */}
+        <nav className="w-56 flex-shrink-0 space-y-0.5">
+          {pages.map(p => (
+            <button
+              key={p.id}
+              onClick={() => setSettingsPage(p.id)}
+              className={`w-full text-left px-3 py-2 rounded-md text-[13px] flex items-center gap-3 transition-colors ${
+                settingsPage === p.id
+                  ? 'bg-[#111113] text-[#10b981]'
+                  : 'text-[#a1a1aa] hover:bg-[#111113] hover:text-[#fafafa]'
+              }`}
+            >
+              <span className="text-[#52525b] w-4 text-center">{p.icon}</span>
+              {p.label}
+            </button>
+          ))}
+        </nav>
+
+        {/* Content */}
+        <div className="flex-1 min-w-0">
+          {settingsPage === 'appearance' && <AppearanceSettings />}
+          {settingsPage === 'search' && <SearchSettings />}
+          {settingsPage === 'startup' && <StartupSettings />}
+          {settingsPage === 'privacy' && <PrivacySettings />}
+          {settingsPage === 'downloads' && <DownloadsSettings />}
+          {settingsPage === 'languages' && <LanguagesSettings />}
+          {settingsPage === 'about' && <AboutSettings />}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SettingRow({ title, desc, children }: { title: string; desc: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between py-4 border-b border-[#1a1a1d]">
+      <div className="flex-1 pr-6">
+        <div className="text-[13px] text-[#fafafa] font-medium">{title}</div>
+        <div className="text-[12px] text-[#71717a] mt-0.5">{desc}</div>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function Select({ value, options, onChange }: { value: string; options: string[]; onChange: (v: string) => void }) {
+  return (
+    <select
+      value={value}
+      onChange={e => onChange(e.target.value)}
+      className="bg-[#111113] border border-[#222225] rounded-md px-3 py-1.5 text-[12px] text-[#fafafa] focus:outline-none focus:border-[#10b981]/50"
+    >
+      {options.map(o => <option key={o} value={o}>{o}</option>)}
+    </select>
+  );
+}
+
+function AppearanceSettings() {
+  const [theme, setTheme] = useState('dark');
+  const [fontSize, setFontSize] = useState('14');
+  return (
+    <div>
+      <h3 className="text-[14px] font-medium text-[#fafafa] mb-4">Внешний вид</h3>
+      <SettingRow title="Тема" desc="Цветовая схема интерфейса">
+        <Select value={theme} options={['Тёмная', 'Светлая', 'Системная']} onChange={setTheme} />
+      </SettingRow>
+      <SettingRow title="Размер шрифта" desc="Размер текста в интерфейсе браузера">
+        <Select value={fontSize} options={['10', '12', '14', '16', '18', '20']} onChange={setFontSize} />
+      </SettingRow>
+      <SettingRow title="Показывать панель закладок" desc="Отображать закладки под адресной строкой">
+        <Toggle checked={true} onChange={() => {}} />
+      </SettingRow>
+      <SettingRow title="Компактный режим" desc="Уменьшить отступы в интерфейсе">
+        <Toggle checked={false} onChange={() => {}} />
+      </SettingRow>
+    </div>
+  );
+}
+
+function SearchSettings() {
+  const [engine, setEngine] = useState('google');
+  return (
+    <div>
+      <h3 className="text-[14px] font-medium text-[#fafafa] mb-4">Поисковая система</h3>
+      <SettingRow title="Поиск по умолчанию" desc="Используется при вводе текста в адресной строке">
+        <Select value={engine} options={['Google', 'DuckDuckGo', 'Bing', 'Яндекс']} onChange={setEngine} />
+      </SettingRow>
+      <SettingRow title="Предлагать поисковые запросы" desc="Показывать подсказки при вводе">
+        <Toggle checked={true} onChange={() => {}} />
+      </SettingRow>
+    </div>
+  );
+}
+
+function StartupSettings() {
+  return (
+    <div>
+      <h3 className="text-[14px] font-medium text-[#fafafa] mb-4">При запуске</h3>
+      <SettingRow title="Восстанавливать вкладки" desc="Открывать предыдущие вкладки при запуске браузера">
+        <Toggle checked={true} onChange={() => {}} />
+      </SettingRow>
+      <SettingRow title="Домашняя страница" desc="Страница, открываемая при нажатии на кнопку ⌂">
+        <Select value="speed-dial" options={['Speed Dial', 'Google', 'Пустая страница']} onChange={() => {}} />
+      </SettingRow>
+      <SettingRow title="Количество вкладок Speed Dial" desc="Сайтов на стартовой странице">
+        <Select value="6" options={['4', '6', '8', '12']} onChange={() => {}} />
+      </SettingRow>
+    </div>
+  );
+}
+
+function PrivacySettings() {
+  return (
+    <div>
+      <h3 className="text-[14px] font-medium text-[#fafafa] mb-4">Конфиденциальность</h3>
+      <SettingRow title="Блокировать всплывающие окна" desc="Запретить сайтам открывать попапы">
+        <Toggle checked={true} onChange={() => {}} />
+      </SettingRow>
+      <SettingRow title="Do Not Track" desc="Отправлять запрос DNT посещаемым сайтам">
+        <Toggle checked={false} onChange={() => {}} />
+      </SettingRow>
+      <SettingRow title="Очищать данные при выходе" desc="Удалять cookies, кеш и историю при закрытии">
+        <Toggle checked={false} onChange={() => {}} />
+      </SettingRow>
+      <SettingRow title="Блокировать трекеры" desc="Препятствовать сбору данных о просмотрах">
+        <Toggle checked={true} onChange={() => {}} />
+      </SettingRow>
+      <SettingRow title="Предупреждать о небезопасных сайтах" desc="Показывать предупреждение перед переходом">
+        <Toggle checked={true} onChange={() => {}} />
+      </SettingRow>
+    </div>
+  );
+}
+
+function DownloadsSettings() {
+  return (
+    <div>
+      <h3 className="text-[14px] font-medium text-[#fafafa] mb-4">Загрузки</h3>
+      <SettingRow title="Папка загрузок" desc="Куда сохранять загружаемые файлы">
+        <span className="text-[12px] text-[#a1a1aa] font-mono">~/Downloads</span>
+      </SettingRow>
+      <SettingRow title="Спрашивать перед загрузкой" desc="Подтверждать место сохранения каждого файла">
+        <Toggle checked={false} onChange={() => {}} />
+      </SettingRow>
+    </div>
+  );
+}
+
+function LanguagesSettings() {
+  return (
+    <div>
+      <h3 className="text-[14px] font-medium text-[#fafafa] mb-4">Языки</h3>
+      <SettingRow title="Язык интерфейса" desc="Язык меню и настроек браузера">
+        <Select value="ru" options={['Русский', 'English', 'Deutsch']} onChange={() => {}} />
+      </SettingRow>
+      <SettingRow title="Переводить страницы" desc="Предлагать перевод незнакомых страниц">
+        <Toggle checked={true} onChange={() => {}} />
+      </SettingRow>
+    </div>
+  );
+}
+
+function AboutSettings() {
+  return (
+    <div>
+      <h3 className="text-[14px] font-medium text-[#fafafa] mb-4">О браузере</h3>
+      <div className="bg-[#111113] border border-[#222225] rounded-lg p-6">
+        <div className="text-2xl mb-2">🚀</div>
+        <div className="text-[15px] font-medium text-[#fafafa] mb-1">Мой Личный Браузер</div>
+        <div className="text-[12px] text-[#71717a] space-y-1">
+          <div>Версия <span className="text-[#10b981] font-mono">1.0.0</span></div>
+          <div>Qt <span className="font-mono">5.15.2</span></div>
+          <div>Chromium <span className="font-mono">87.0.4280.144</span></div>
+          <div>Python <span className="font-mono">3.11</span></div>
+        </div>
+        <div className="mt-4 pt-4 border-t border-[#1a1a1d] text-[12px] text-[#52525b]">
+          © 2026. Создано с помощью PyQt5 и PyQtWebEngine.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============ CODE ============
+
+function CodeSection({ code, reqCode, copied, onCopy }: {
+  code: string; reqCode: string; copied: boolean; onCopy: () => void;
+}) {
+  const [file, setFile] = useState<'main' | 'req'>('main');
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-end justify-between">
+        <div>
+          <h2 className="text-3xl font-semibold tracking-tight">Исходный код</h2>
+          <p className="text-[#a1a1aa] text-sm mt-1">Полный код браузера в одном файле</p>
+        </div>
+        <button
+          onClick={onCopy}
+          className="px-4 py-2 rounded-md bg-[#10b981] text-[#0a0a0c] text-[12px] font-medium hover:bg-[#34d399] transition-colors"
+        >
+          {copied ? '✓ Скопировано' : 'Копировать код'}
+        </button>
+      </div>
+
+      {/* File tabs */}
+      <div className="flex gap-1 bg-[#111113] border border-[#222225] rounded-t-lg p-1 w-fit">
+        <button
+          onClick={() => setFile('main')}
+          className={`px-3 py-1.5 rounded-md text-[12px] font-mono transition-colors ${
+            file === 'main' ? 'bg-[#0a0a0c] text-[#fafafa]' : 'text-[#71717a] hover:text-[#a1a1aa]'
+          }`}
+        >
+          browser.py
+        </button>
+        <button
+          onClick={() => setFile('req')}
+          className={`px-3 py-1.5 rounded-md text-[12px] font-mono transition-colors ${
+            file === 'req' ? 'bg-[#0a0a0c] text-[#fafafa]' : 'text-[#71717a] hover:text-[#a1a1aa]'
+          }`}
+        >
+          requirements.txt
+        </button>
+      </div>
+
+      <div className="border border-[#222225] rounded-b-lg overflow-hidden">
+        <SyntaxHighlighter
+          language={file === 'main' ? 'python' : 'text'}
+          style={oneDark}
+          customStyle={{
+            margin: 0,
+            padding: '20px',
+            background: '#0a0a0c',
+            fontSize: '12px',
+            lineHeight: '1.65',
+            borderRadius: '0 0 8px 8px',
+          }}
+          showLineNumbers
+          lineNumberStyle={{ color: '#27272a', paddingRight: '16px' }}
+        >
+          {file === 'main' ? code : reqCode}
+        </SyntaxHighlighter>
+      </div>
+    </div>
+  );
+}
+
+// ============ SHORTCUTS ============
+
+function ShortcutsSection() {
+  const groups = [
+    {
+      title: 'Вкладки',
+      items: [
+        ['Ctrl+T', 'Новая вкладка'],
+        ['Ctrl+W', 'Закрыть текущую вкладку'],
+        ['Ctrl+Tab', 'Следующая вкладка'],
+        ['Ctrl+Shift+Tab', 'Предыдущая вкладка'],
+        ['Ctrl+Shift+T', 'Восстановить закрытую'],
+      ],
+    },
+    {
+      title: 'Навигация',
+      items: [
+        ['Alt+←', 'Назад'],
+        ['Alt+→', 'Вперёд'],
+        ['Ctrl+R', 'Обновить страницу'],
+        ['Ctrl+L', 'Фокус на адресную строку'],
+        ['Ctrl+H', 'Домашняя страница'],
+      ],
+    },
+    {
+      title: 'Данные',
+      items: [
+        ['Ctrl+D', 'Добавить в закладки'],
+        ['Ctrl+B', 'Показать закладки'],
+        ['Ctrl+J', 'Загрузки'],
+        ['Ctrl+Shift+Del', 'Очистить данные'],
+      ],
+    },
+    {
+      title: 'Приложение',
+      items: [
+        ['Ctrl+,', 'Открыть настройки'],
+        ['Ctrl+Q', 'Выйти из браузера'],
+        ['F11', 'Полноэкранный режим'],
+        ['F12', 'Инструменты разработчика'],
+      ],
+    },
+  ];
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-3xl font-semibold tracking-tight">Горячие клавиши</h2>
+        <p className="text-[#a1a1aa] text-sm mt-1">Все доступные сочетания клавиш</p>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {groups.map((g, i) => (
+          <div key={i} className="bg-[#111113] border border-[#222225] rounded-lg p-5">
+            <h3 className="text-[12px] text-[#71717a] tracking-wider uppercase mb-4">{g.title}</h3>
+            <div className="space-y-2">
+              {g.items.map(([keys, action], j) => (
+                <div key={j} className="flex items-center justify-between py-1.5">
+                  <span className="text-[13px] text-[#a1a1aa]">{action}</span>
+                  <kbd className="font-mono text-[11px] bg-[#0a0a0c] border border-[#222225] rounded px-2 py-0.5 text-[#10b981]">
+                    {keys}
+                  </kbd>
                 </div>
               ))}
             </div>
           </div>
-          {/* Status bar */}
-          <div className="bg-[#0f0c29] border-t border-[#2d2d4a] px-4 py-2">
-            <span className="text-xs text-gray-500">Готово ✓</span>
-          </div>
-        </div>
-      </section>
-
-      {/* Keyboard shortcuts */}
-      <section className="max-w-7xl mx-auto px-6 pb-12">
-        <h2 className="text-2xl font-bold text-purple-200 mb-6 flex items-center gap-3">
-          <span>⌨️</span> Горячие клавиши
-        </h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {[
-            { keys: 'Ctrl+T', action: 'Новая вкладка' },
-            { keys: 'Ctrl+W', action: 'Закрыть вкладку' },
-            { keys: 'Ctrl+L', action: 'Фокус на адресную строку' },
-            { keys: 'Ctrl+R', action: 'Обновить страницу' },
-            { keys: 'Ctrl+D', action: 'Добавить в закладки' },
-            { keys: 'Ctrl+Tab', action: 'Следующая вкладка' },
-            { keys: 'Ctrl+Shift+Tab', action: 'Предыдущая вкладка' },
-          ].map((item, i) => (
-            <div key={i} className="flex items-center justify-between bg-[#16213e]/60 border border-purple-900/20 rounded-xl px-5 py-3">
-              <span className="text-gray-300 text-sm">{item.action}</span>
-              <kbd className="bg-[#0f0c29] border border-purple-500/30 rounded-lg px-3 py-1 text-xs text-purple-300 font-mono">
-                {item.keys}
-              </kbd>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* Footer */}
-      <footer className="border-t border-purple-900/20 bg-[#0f0c29] py-6">
-        <div className="max-w-7xl mx-auto px-6 text-center text-gray-500 text-sm">
-          <p>🚀 Мой Личный Браузер — Создан с ❤️ на PyQt5</p>
-          <p className="mt-1 text-gray-600">pip install PyQt5 PyQtWebEngine && python browser.py</p>
-        </div>
-      </footer>
+        ))}
+      </div>
     </div>
   );
 }
