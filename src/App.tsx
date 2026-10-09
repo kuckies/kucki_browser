@@ -5,7 +5,12 @@ import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 type Section = 'preview' | 'extensions' | 'settings' | 'code' | 'shortcuts';
 
 // ============ CODE ============
-const mainCode = `import sys
+const mainCode = `# ============================================================
+# KUCKI BROWSER v1.0.0
+# Разработано: Kucki Development
+# ============================================================
+
+import sys
 from PyQt5.QtCore import QUrl, Qt, QSize, QSettings
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QLineEdit, QPushButton, QToolBar,
@@ -40,7 +45,7 @@ class Extension:
 class DarkModeExt(Extension):
     def __init__(self):
         super().__init__("dark-mode", "Тёмный режим", "1.2.0",
-            "Принудительная тёмная тема на всех сайтах", "🌙", "Browser Team")
+            "Принудительная тёмная тема на всех сайтах", "🌙", "Kucki Development")
 
     def on_load(self, page):
         page.runJavaScript("""
@@ -53,7 +58,7 @@ class DarkModeExt(Extension):
 class AdBlockerExt(Extension):
     def __init__(self):
         super().__init__("ad-blocker", "Блокировщик рекламы", "2.0.1",
-            "Удаляет баннеры, попапы и трекеры", "🛡️", "Browser Team")
+            "Удаляет баннеры, попапы и трекеры", "🛡️", "Kucki Development")
 
     def on_load(self, page):
         page.runJavaScript("""
@@ -66,18 +71,18 @@ class AdBlockerExt(Extension):
 class ReaderExt(Extension):
     def __init__(self):
         super().__init__("reader", "Режим чтения", "1.0.0",
-            "Убирает всё лишнее, оставляя только текст", "📖", "Browser Team")
+            "Убирает всё лишнее, оставляя только текст", "📖", "Kucki Development")
 
 
 class BookmarksExt(Extension):
     def __init__(self):
         super().__init__("bookmarks", "Закладки", "1.1.0",
-            "Управление закладками с синхронизацией", "⭐", "Browser Team")
+            "Управление закладками с синхронизацией", "⭐", "Kucki Development")
         self.items = []
         self._load()
 
     def _load(self):
-        s = QSettings("MyBrowser", "Bookmarks")
+        s = QSettings("KuckiBrowser", "Bookmarks")
         n = s.beginReadArray("items")
         for i in range(n):
             s.setArrayIndex(i)
@@ -89,7 +94,7 @@ class BookmarksExt(Extension):
         self._save()
 
     def _save(self):
-        s = QSettings("MyBrowser", "Bookmarks")
+        s = QSettings("KuckiBrowser", "Bookmarks")
         s.beginWriteArray("items")
         for i, b in enumerate(self.items):
             s.setArrayIndex(i)
@@ -100,7 +105,7 @@ class BookmarksExt(Extension):
 class SpeedDialExt(Extension):
     def __init__(self):
         super().__init__("speed-dial", "Быстрый набор", "1.0.0",
-            "Стартовая страница с избранными сайтами", "🏠", "Browser Team")
+            "Стартовая страница с избранными сайтами", "🏠", "Kucki Development")
 
 
 # ============================================================
@@ -119,14 +124,14 @@ class ExtensionManager:
             self.extensions[ext.id] = ext
 
     def _load_state(self):
-        s = QSettings("MyBrowser", "Extensions")
+        s = QSettings("KuckiBrowser", "Extensions")
         enabled = s.value("enabled", []) or []
         for ext_id in enabled:
             if ext_id in self.extensions:
                 self.extensions[ext_id].enabled = True
 
     def _save_state(self):
-        s = QSettings("MyBrowser", "Extensions")
+        s = QSettings("KuckiBrowser", "Extensions")
         s.setValue("enabled", [e.id for e in self.extensions.values() if e.enabled])
 
     def toggle(self, ext_id):
@@ -141,12 +146,12 @@ class ExtensionManager:
 
 
 # ============================================================
-# НАСТРОЙКИ БРАУЗЕРА
+# НАСТРОЙКИ KUCKI BROWSER
 # ============================================================
 
 class BrowserSettings:
     def __init__(self):
-        self.s = QSettings("MyBrowser", "Config")
+        self.s = QSettings("KuckiBrowser", "Config")
         self.load()
 
     def load(self):
@@ -405,13 +410,13 @@ class SettingsWindow(QMainWindow):
 
 
 # ============================================================
-# ОСНОВНОЙ БРАУЗЕР
+# KUCKI BROWSER — основное окно
 # ============================================================
 
-class MyPersonalBrowser(QMainWindow):
+class KuckiBrowser(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Мой Личный Браузер")
+        self.setWindowTitle("Kucki Browser")
         self.resize(1400, 900)
 
         self.settings = BrowserSettings()
@@ -588,9 +593,11 @@ class MyPersonalBrowser(QMainWindow):
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+    app.setApplicationName("Kucki Browser")
+    app.setOrganizationName("Kucki Development")
     app.setStyle("Fusion")
     app.setFont(QFont("Inter", 10))
-    w = MyPersonalBrowser()
+    w = KuckiBrowser()
     w.show()
     sys.exit(app.exec_())
 `;
@@ -613,11 +620,11 @@ function App() {
   });
 
   const extensions = [
-    { id: 'dark-mode', name: 'Тёмный режим', ver: '1.2.0', desc: 'Принудительная тёмная тема на всех сайтах', icon: '🌙', author: 'Browser Team' },
-    { id: 'ad-blocker', name: 'Блокировщик рекламы', ver: '2.0.1', desc: 'Удаляет баннеры, попапы и трекеры', icon: '🛡️', author: 'Browser Team' },
-    { id: 'reader', name: 'Режим чтения', ver: '1.0.0', desc: 'Убирает всё лишнее, оставляя только текст', icon: '📖', author: 'Browser Team' },
-    { id: 'bookmarks', name: 'Закладки', ver: '1.1.0', desc: 'Управление закладками с синхронизацией', icon: '⭐', author: 'Browser Team' },
-    { id: 'speed-dial', name: 'Быстрый набор', ver: '1.0.0', desc: 'Стартовая страница с избранными сайтами', icon: '🏠', author: 'Browser Team' },
+    { id: 'dark-mode', name: 'Тёмный режим', ver: '1.2.0', desc: 'Принудительная тёмная тема на всех сайтах', icon: '🌙', author: 'Kucki Development' },
+    { id: 'ad-blocker', name: 'Блокировщик рекламы', ver: '2.0.1', desc: 'Удаляет баннеры, попапы и трекеры', icon: '🛡️', author: 'Kucki Development' },
+    { id: 'reader', name: 'Режим чтения', ver: '1.0.0', desc: 'Убирает всё лишнее, оставляя только текст', icon: '📖', author: 'Kucki Development' },
+    { id: 'bookmarks', name: 'Закладки', ver: '1.1.0', desc: 'Управление закладками с синхронизацией', icon: '⭐', author: 'Kucki Development' },
+    { id: 'speed-dial', name: 'Быстрый набор', ver: '1.0.0', desc: 'Стартовая страница с избранными сайтами', icon: '🏠', author: 'Kucki Development' },
   ];
 
   const toggleExt = (id: string) => {
@@ -693,8 +700,9 @@ function App() {
         {section === 'shortcuts' && <ShortcutsSection />}
       </main>
 
-      <footer className="border-t border-[#1a1a1d] py-6 text-center text-[11px] text-[#52525b]">
-        <code className="font-mono">pip install PyQt5 PyQtWebEngine && python browser.py</code>
+      <footer className="border-t border-[#1a1a1d] py-6 text-center text-[11px] text-[#52525b] space-y-1">
+        <div>© 2026 <span className="text-[#71717a]">Kucki Development</span> · Kucki Browser v1.0.0</div>
+        <code className="font-mono">pip install PyQt5 PyQtWebEngine && python kucki_browser.py</code>
       </footer>
     </div>
   );
@@ -708,14 +716,14 @@ function PreviewSection() {
       <div>
         <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[#10b981]/10 border border-[#10b981]/20 text-[#10b981] text-[11px] tracking-wider uppercase mb-4">
           <span className="w-1.5 h-1.5 rounded-full bg-[#10b981] animate-pulse" />
-          PyQt5 · Desktop Browser
+          Kucki Development · PyQt5
         </div>
         <h1 className="text-5xl font-semibold tracking-tight text-[#fafafa] mb-3">
-          Мой Личный Браузер
+          Kucki Browser
         </h1>
         <p className="text-[#a1a1aa] text-lg max-w-2xl leading-relaxed">
           Минималистичный десктопный браузер с вкладками, тёмной темой и системой расширений.
-          Написан на Python + PyQt5.
+          Разработан командой Kucki Development на Python + PyQt5.
         </p>
       </div>
 
@@ -728,7 +736,7 @@ function PreviewSection() {
             <div className="w-3 h-3 rounded-full bg-[#febc2e]" />
             <div className="w-3 h-3 rounded-full bg-[#28c840]" />
           </div>
-          <div className="flex-1 text-center text-[11px] text-[#71717a]">Мой Личный Браузер</div>
+          <div className="flex-1 text-center text-[11px] text-[#71717a]">Kucki Browser</div>
         </div>
 
         {/* Tab bar */}
@@ -814,9 +822,9 @@ function ExtensionsSection({ extensions, enabled, onToggle }: {
   return (
     <div className="space-y-6">
       <div>
-        <div className="text-[11px] text-[#71717a] tracking-wider uppercase mb-2">chrome://extensions</div>
+        <div className="text-[11px] text-[#71717a] tracking-wider uppercase mb-2">kucki://extensions</div>
         <h2 className="text-3xl font-semibold tracking-tight">Расширения</h2>
-        <p className="text-[#a1a1aa] text-sm mt-1">Управление установленными расширениями браузера</p>
+        <p className="text-[#a1a1aa] text-sm mt-1">Управление расширениями Kucki Browser</p>
       </div>
 
       {/* Top controls */}
@@ -917,8 +925,9 @@ function SettingsSection() {
   return (
     <div className="space-y-6">
       <div>
-        <div className="text-[11px] text-[#71717a] tracking-wider uppercase mb-2">chrome://settings</div>
+        <div className="text-[11px] text-[#71717a] tracking-wider uppercase mb-2">kucki://settings</div>
         <h2 className="text-3xl font-semibold tracking-tight">Настройки</h2>
+        <p className="text-[#a1a1aa] text-sm mt-1">Персонализируйте Kucki Browser под себя</p>
       </div>
 
       <div className="flex gap-6">
@@ -1090,15 +1099,16 @@ function AboutSettings() {
       <h3 className="text-[14px] font-medium text-[#fafafa] mb-4">О браузере</h3>
       <div className="bg-[#111113] border border-[#222225] rounded-lg p-6">
         <div className="text-2xl mb-2">🚀</div>
-        <div className="text-[15px] font-medium text-[#fafafa] mb-1">Мой Личный Браузер</div>
+        <div className="text-[15px] font-medium text-[#fafafa] mb-1">Kucki Browser</div>
         <div className="text-[12px] text-[#71717a] space-y-1">
           <div>Версия <span className="text-[#10b981] font-mono">1.0.0</span></div>
+          <div>Разработчик: <span className="text-[#a1a1aa]">Kucki Development</span></div>
           <div>Qt <span className="font-mono">5.15.2</span></div>
           <div>Chromium <span className="font-mono">87.0.4280.144</span></div>
           <div>Python <span className="font-mono">3.11</span></div>
         </div>
         <div className="mt-4 pt-4 border-t border-[#1a1a1d] text-[12px] text-[#52525b]">
-          © 2026. Создано с помощью PyQt5 и PyQtWebEngine.
+          © 2026 Kucki Development. Все права защищены.
         </div>
       </div>
     </div>
@@ -1117,7 +1127,7 @@ function CodeSection({ code, reqCode, copied, onCopy }: {
       <div className="flex items-end justify-between">
         <div>
           <h2 className="text-3xl font-semibold tracking-tight">Исходный код</h2>
-          <p className="text-[#a1a1aa] text-sm mt-1">Полный код браузера в одном файле</p>
+          <p className="text-[#a1a1aa] text-sm mt-1">Полный код Kucki Browser в одном файле</p>
         </div>
         <button
           onClick={onCopy}
@@ -1135,7 +1145,7 @@ function CodeSection({ code, reqCode, copied, onCopy }: {
             file === 'main' ? 'bg-[#0a0a0c] text-[#fafafa]' : 'text-[#71717a] hover:text-[#a1a1aa]'
           }`}
         >
-          browser.py
+          kucki_browser.py
         </button>
         <button
           onClick={() => setFile('req')}
