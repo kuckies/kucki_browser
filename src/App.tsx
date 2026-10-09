@@ -906,9 +906,9 @@ function App() {
     <div className="min-h-screen bg-[#0a0a0c] text-[#fafafa] font-sans antialiased">
       {/* Top bar — как в Chrome: вкладки + кнопки окна в одной строке */}
       <div className="sticky top-0 z-50 bg-[#0a0a0c] border-b border-[#222225]">
-        <div className="flex items-end px-2 pt-1">
+        <div className="flex items-center h-[38px] px-2">
           {/* Логотип */}
-          <div className="flex items-center px-2 pb-2">
+          <div className="flex items-center px-2 h-full">
             <span className="text-[13px]">🚀</span>
           </div>
 
@@ -917,7 +917,7 @@ function App() {
             <button
               key={s.id}
               onClick={() => setSection(s.id)}
-              className={`px-4 py-2 text-[12px] rounded-t-lg flex items-center gap-2 mt-1 min-w-[100px] max-w-[200px] transition-colors ${
+              className={`px-4 py-2 text-[12px] rounded-t-lg flex items-center gap-2 min-w-[100px] max-w-[200px] transition-colors ${
                 section === s.id
                   ? 'bg-[#27272a] text-[#fafafa]'
                   : 'bg-[#18181b] text-[#a1a1aa] hover:bg-[#1f1f23] hover:text-[#fafafa]'
@@ -925,22 +925,16 @@ function App() {
             >
               <span className="opacity-70 text-[11px]">{s.icon}</span>
               <span className="truncate">{s.label}</span>
-              {section === s.id && (
-                <span className="ml-auto w-3 h-3 flex items-center justify-center rounded hover:bg-red-500/30 text-[#71717a] hover:text-[#fafafa] text-[10px]">×</span>
-              )}
             </button>
           ))}
-
-          {/* Кнопка "+" */}
-          <button className="w-8 h-7 flex items-center justify-center rounded-md text-[#71717a] hover:bg-[#1a1a1d] hover:text-[#fafafa] text-sm mt-1 ml-1">+</button>
 
           <div className="flex-1" />
 
           {/* Кнопки окна */}
-          <div className="flex items-center">
-            <button className="w-[46px] h-[38px] flex items-center justify-center text-[#71717a] hover:bg-[#1a1a1d] hover:text-[#fafafa] transition-colors text-[11px]">—</button>
-            <button className="w-[46px] h-[38px] flex items-center justify-center text-[#71717a] hover:bg-[#1a1a1d] hover:text-[#fafafa] transition-colors text-[11px]">□</button>
-            <button className="w-[46px] h-[38px] flex items-center justify-center text-[#71717a] hover:bg-[#ef4444] hover:text-white transition-colors text-[11px]">✕</button>
+          <div className="flex items-center h-full">
+            <button className="w-[46px] h-full flex items-center justify-center text-[#71717a] hover:bg-[#1a1a1d] hover:text-[#fafafa] transition-colors text-[11px]">—</button>
+            <button className="w-[46px] h-full flex items-center justify-center text-[#71717a] hover:bg-[#1a1a1d] hover:text-[#fafafa] transition-colors text-[11px]">□</button>
+            <button className="w-[46px] h-full flex items-center justify-center text-[#71717a] hover:bg-[#ef4444] hover:text-white transition-colors text-[11px]">✕</button>
           </div>
         </div>
       </div>
@@ -997,37 +991,37 @@ function PreviewSection() {
       {/* Browser mockup — структура как в Chrome */}
       <div className="rounded-xl overflow-hidden border border-[#222225] shadow-2xl shadow-black/40">
         {/* Tab bar + window controls — одна строка, как в Chrome */}
-        <div className="bg-[#0a0a0c] flex items-end px-2 pt-1">
+        <div className="bg-[#0a0a0c] flex items-center h-[38px] px-2">
           {/* Логотип */}
-          <div className="flex items-center px-2 pb-2">
+          <div className="flex items-center px-2 h-full">
             <span className="text-[13px]">🚀</span>
           </div>
 
           {/* Активная вкладка */}
-          <div className="bg-[#27272a] text-[#fafafa] text-[12px] px-3 py-2 rounded-t-lg flex items-center gap-2 mt-1 min-w-[120px] max-w-[240px]">
+          <div className="bg-[#27272a] text-[#fafafa] text-[12px] px-3 py-1.5 rounded-t-lg flex items-center gap-2 min-w-[120px] max-w-[240px]">
             <span className="text-[#10b981] text-[10px]">◉</span>
             <span className="truncate flex-1">Google</span>
             <button className="w-4 h-4 flex items-center justify-center rounded hover:bg-red-500/30 text-[#71717a] hover:text-[#fafafa] text-[10px] flex-shrink-0">×</button>
           </div>
 
           {/* Неактивная вкладка */}
-          <div className="bg-[#18181b] text-[#a1a1aa] text-[12px] px-3 py-2 rounded-t-lg flex items-center gap-2 ml-0.5 mt-1 min-w-[120px] max-w-[240px] hover:bg-[#1f1f23]">
+          <div className="bg-[#18181b] text-[#a1a1aa] text-[12px] px-3 py-1.5 rounded-t-lg flex items-center gap-2 ml-0.5 min-w-[120px] max-w-[240px] hover:bg-[#1f1f23]">
             <span className="text-[10px]">💻</span>
             <span className="truncate flex-1">GitHub</span>
-            <button className="w-4 h-4 flex items-center justify-center rounded hover:bg-red-500/30 text-[#52525b] hover:text-[#fafafa] text-[10px] flex-shrink-0 opacity-0 hover:opacity-100">×</button>
+            <button className="w-4 h-4 flex items-center justify-center rounded hover:bg-red-500/30 text-[#52525b] hover:text-[#fafafa] text-[10px] flex-shrink-0">×</button>
           </div>
 
           {/* Кнопка новой вкладки */}
-          <button className="w-8 h-7 flex items-center justify-center rounded-md text-[#71717a] hover:bg-[#1a1a1d] hover:text-[#fafafa] text-sm mt-1 ml-1">+</button>
+          <button className="w-7 h-7 flex items-center justify-center rounded-md text-[#71717a] hover:bg-[#1a1a1d] hover:text-[#fafafa] text-sm ml-1">+</button>
 
           {/* Спейсер */}
           <div className="flex-1" />
 
           {/* Кнопки управления окном — справа, как в Chrome */}
-          <div className="flex items-center">
-            <button className="w-[46px] h-[38px] flex items-center justify-center text-[#71717a] hover:bg-[#1a1a1d] hover:text-[#fafafa] transition-colors text-[11px]">—</button>
-            <button className="w-[46px] h-[38px] flex items-center justify-center text-[#71717a] hover:bg-[#1a1a1d] hover:text-[#fafafa] transition-colors text-[11px]">□</button>
-            <button className="w-[46px] h-[38px] flex items-center justify-center text-[#71717a] hover:bg-[#ef4444] hover:text-white transition-colors text-[11px]">✕</button>
+          <div className="flex items-center h-full">
+            <button className="w-[46px] h-full flex items-center justify-center text-[#71717a] hover:bg-[#1a1a1d] hover:text-[#fafafa] transition-colors text-[11px]">—</button>
+            <button className="w-[46px] h-full flex items-center justify-center text-[#71717a] hover:bg-[#1a1a1d] hover:text-[#fafafa] transition-colors text-[11px]">□</button>
+            <button className="w-[46px] h-full flex items-center justify-center text-[#71717a] hover:bg-[#ef4444] hover:text-white transition-colors text-[11px]">✕</button>
           </div>
         </div>
 
